@@ -1,0 +1,21 @@
+[Unit]
+Description=Freezer Monitor — Database Logger Service
+After=network.target
+RequiresMountsFor=/data
+
+[Service]
+Type=simple
+User=pi
+ExecStart=/usr/bin/python3 -u /opt/freezerpi/db_logger.py
+StandardOutput=journal
+StandardError=journal
+Restart=always
+RestartSec=5
+ReadWritePaths=/run /data
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

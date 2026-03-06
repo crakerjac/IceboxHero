@@ -1,0 +1,59 @@
+[system]
+device_id = freezer-pi-01
+ntp_sync_year = 2024
+log_level = INFO
+
+[sampling]
+poll_interval = 60
+db_commit_interval = 300
+temp_warning = 10.0
+temp_critical = 15.0
+
+[hardware]
+buzzer_pin = 17
+button_pin = 27
+lcd_dc_pin = 24
+lcd_rst_pin = 25
+# 1-Wire bus pin (Requires: dtoverlay=w1-gpio,gpiopin=4 in /boot/firmware/config.txt)
+one_wire_pin = 4
+
+[sensors]
+# Format: ROM_ID = Logical Name
+# Find your ROM IDs under /sys/bus/w1/devices/ after wiring with the overlay enabled.
+28-00000xxxxxxx = big_freezer
+28-00000yyyyyyy = small_freezer
+
+[display]
+refresh_rate = 0.5
+stale_timeout = 600
+
+[alerts]
+silence_duration = 3600
+email_cooldown = 3600
+sensor_freeze_seconds = 180
+
+[email]
+smtp_server = smtp.gmail.com
+smtp_port = 465
+smtp_user = your_email@gmail.com
+# NOTE: Use a Gmail App Password here if 2FA is enabled on your account.
+# Generate one at: https://myaccount.google.com/apppasswords
+smtp_pass = xxxx-xxxx-xxxx-xxxx
+recipient = your_email@gmail.com
+
+[network]
+web_port = 8080
+# Create two separate checks at https://healthchecks.io and paste the ping URLs below.
+# Leave as-is to disable external monitoring.
+heartbeat_url = https://hc-ping.com/your-unique-uuid-here
+email_alive_url = https://hc-ping.com/your-email-alive-uuid
+
+[database]
+# Number of days to retain 5-minute raw data before pruning
+retention_days = 45
+# How often to back up the RAM database to the SD card (hours)
+backup_interval_hours = 4
+
+[watchdog]
+# Frequency of software pings to /dev/watchdog (seconds)
+ping_interval = 10
