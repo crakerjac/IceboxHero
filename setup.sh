@@ -181,13 +181,18 @@ warn "A reboot is required after setup for these hardware changes to take effect
 header "Installing System Packages"
 
 apt-get update -qq
+# Pillow build dependencies: needed when pip must compile from source
+# (no pre-built wheel available for this Python version on 32-bit ARM)
 apt-get install -y --no-install-recommends \
     git \
     watchdog \
     python3-pip \
     python3-venv \
     fonts-dejavu-core \
-    curl
+    curl \
+    zlib1g-dev \
+    libjpeg-dev \
+    libfreetype6-dev
 success "System packages installed"
 
 # =============================================================================
@@ -195,7 +200,7 @@ success "System packages installed"
 # =============================================================================
 header "Installing Python Dependencies"
 
-pip3 install --break-system-packages \
+pip3 install --break-system-packages --retries 5 \
     gpiozero \
     Pillow \
     flask \
