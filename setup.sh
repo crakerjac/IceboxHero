@@ -313,8 +313,13 @@ file   = /run/telemetry_state.json
 change = 180
 EOF
 
-systemctl enable --now watchdog
-success "Watchdog configured and enabled"
+# Enable the watchdog service so it can be started later, but do NOT start
+# it now. The watchdog monitors the IPC file for updates — if sensors are
+# not connected yet, it will trigger a reboot loop. start_services.sh arms
+# the watchdog only after confirming sensors are present and services are up.
+systemctl enable watchdog
+systemctl stop watchdog 2>/dev/null || true
+success "Watchdog configured and enabled (not yet started — run start_services.sh)"
 
 # =============================================================================
 # STEP 9 — logrotate
@@ -397,7 +402,7 @@ echo  "  ✓ System packages installed"
 echo  "  ✓ Python dependencies installed"
 echo  "  ✓ Source code deployed to /opt/freezerpi/"
 echo  "  ✓ /data directory structure created"
-echo  "  ✓ Watchdog daemon configured and enabled"
+echo  "  ✓ Watchdog daemon configured and enabled (NOT started — armed by start_services.sh)"
 echo  "  ✓ logrotate configured"
 echo  "  ✓ Five systemd services installed and enabled"
 echo  "  ✓ Weekly CRON job scheduled for database maintenance"
