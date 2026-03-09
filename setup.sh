@@ -1,0 +1,420 @@
+#!/usr/bin/env bash
+# =============================================================================
+# FreezerPi Setup Script
+# https://github.com/crakerjac/freezerPi
+#
+# Usage (from cloned repo):
+#   sudo ./setup.sh
+#
+# Usage (downloaded standalone — no git required on the Pi beforehand):
+#   curl -fsSL https://raw.githubusercontent.com/crakerjac/freezerPi/main/setup.sh -o setup.sh
+#   sudo bash setup.sh
+#   (The script will install git and clone the repo automatically.)
+#
+# What this script does (automatically):
+#   - Installs system packages (watchdog, python3-pip, etc.)
+#   - Installs Python dependencies
+#   - Deploys source code to /opt/freezerpi/
+#   - Copies config template to /data/config/config.ini (if not present)
+#   - Downloads Chart.js for the local web dashboard
+#   - Configures /boot/firmware/config.txt (watchdog, SPI, 1-Wire)
+#   - Configures /etc/watchdog.conf
+#   - Installs logrotate configuration
+#   - Installs and enables all five systemd services
+#   - Adds the weekly database maintenance CRON job
+#
+# What you must do manually (before running this script):
+#   - Create and mount the /data ext4 partition (see README Step 1)
+#   - Add /dev/mmcblk0p3 to /etc/fstab (see README Step 1)
+#
+# What you must do manually (after running this script):
+#   - Edit /data/config/config.ini with your sensor ROM IDs and credentials
+#   - Download and place chart.min.js if the automatic download fails
+#   - Enable the read-only overlay LAST, after verifying everything works:
+#       sudo raspi-config → Performance Options → Overlay File System
+#
+# License: GNU General Public License v3.0
+# =============================================================================
+
+set -euo pipefail
+
+# =============================================================================
+# Colour helpers
+# =============================================================================
+RED='\033[0;31m'
+GRN='\033[0;32m'
+YEL='\033[0;33m'
+BLU='\033[0;34m'
+BOLD='\033[1m'
+RST='\033[0m'
+
+info()    { echo -e "${BLU}[INFO]${RST}  $*"; }
+success() { echo -e "${GRN}[OK]${RST}    $*"; }
+warn()    { echo -e "${YEL}[WARN]${RST}  $*"; }
+error()   { echo -e "${RED}[ERROR]${RST} $*"; }
+header()  { echo -e "\n${BOLD}${BLU}=== $* ===${RST}"; }
+
+# =============================================================================
+# Must run as root
+# =============================================================================
+if [[ $EUID -ne 0 ]]; then
+    error "This script must be run as root."
+    echo  "      Run: sudo ./setup.sh"
+    exit 1
+fi
+
+# Capture the real user who invoked sudo (for crontab installation)
+REAL_USER="${SUDO_USER:-pi}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# =============================================================================
+# Bootstrap: if run as a standalone downloaded script (not from a cloned repo),
+# install git, clone the repo, and re-exec from the correct location.
+# This supports: curl -fsSL .../setup.sh | sudo bash
+# =============================================================================
+REPO_URL="https://github.com/crakerjac/freezerPi.git"
+
+if [[ ! -f "${SCRIPT_DIR}/config.ini.template" ]]; then
+    echo ""
+    echo -e "${BOLD}Bootstrap mode:${RST} repository files not found alongside this script."
+    echo -e "Installing git and cloning ${REPO_URL}...\n"
+
+    apt-get update -qq
+    apt-get install -y --no-install-recommends git
+
+    CLONE_DIR="/opt/freezerpi-src"
+    if [[ -d "${CLONE_DIR}/.git" ]]; then
+        info "Updating existing clone at ${CLONE_DIR}..."
+        git -C "${CLONE_DIR}" pull --ff-only
+    else
+        git clone "${REPO_URL}" "${CLONE_DIR}"
+    fi
+
+    chown -R "${REAL_USER}:${REAL_USER}" "${CLONE_DIR}"
+    echo ""
+    echo -e "Re-executing setup from repository root...\n"
+    exec bash "${CLONE_DIR}/setup.sh"
+fi
+
+echo ""
+echo -e "${BOLD}FreezerPi — Automated Setup${RST}"
+echo    "Running from: ${SCRIPT_DIR}"
+echo    "Installing as user: ${REAL_USER}"
+echo ""
+
+# =============================================================================
+# STEP 0 — Preflight checks
+# =============================================================================
+header "Preflight Checks"
+
+# Confirm /data is mounted
+if ! mountpoint -q /data; then
+    error "/data is not mounted."
+    echo ""
+    echo  "  The /data partition must be created and mounted before running this"
+    echo  "  script. See README Step 1 for the one-time partition setup:"
+    echo ""
+    echo  "    sudo fdisk /dev/mmcblk0        # create p3"
+    echo  "    sudo mkfs.ext4 /dev/mmcblk0p3"
+    echo  "    sudo mkdir -p /data/config /data/db /data/logs"
+    echo  "    # Add to /etc/fstab:"
+    echo  "    # /dev/mmcblk0p3  /data  ext4  defaults,noatime  0  2"
+    echo  "    sudo mount -a"
+    echo  "    sudo chown -R ${REAL_USER}:${REAL_USER} /data"
+    echo ""
+    exit 1
+fi
+success "/data is mounted"
+
+# Check we're on a Raspberry Pi
+if ! grep -q "Raspberry Pi" /proc/cpuinfo 2>/dev/null && \
+   ! grep -q "Raspberry Pi" /sys/firmware/devicetree/base/model 2>/dev/null; then
+    warn "Could not confirm this is a Raspberry Pi. Proceeding anyway."
+else
+    MODEL=$(cat /sys/firmware/devicetree/base/model 2>/dev/null | tr -d '\0' || echo "Raspberry Pi")
+    success "Detected: ${MODEL}"
+fi
+
+# Confirm script is running from the repo root (sanity check)
+if [[ ! -f "${SCRIPT_DIR}/config.ini.template" ]]; then
+    error "config.ini.template not found in ${SCRIPT_DIR}"
+    echo  "      Run this script from the root of the cloned repository."
+    exit 1
+fi
+success "Repository structure looks correct"
+
+# =============================================================================
+# STEP 1 — /boot/firmware/config.txt
+# =============================================================================
+header "Configuring /boot/firmware/config.txt"
+
+# Support both newer and older Pi OS boot paths
+if [[ -f /boot/firmware/config.txt ]]; then
+    BOOT_CONFIG="/boot/firmware/config.txt"
+elif [[ -f /boot/config.txt ]]; then
+    BOOT_CONFIG="/boot/config.txt"
+    warn "Using legacy boot path: /boot/config.txt"
+else
+    error "Cannot find config.txt in /boot/firmware/ or /boot/"
+    exit 1
+fi
+
+add_boot_param() {
+    local param="$1"
+    if grep -qF "${param}" "${BOOT_CONFIG}"; then
+        info "Already set: ${param}"
+    else
+        echo "${param}" >> "${BOOT_CONFIG}"
+        success "Added: ${param}"
+    fi
+}
+
+add_boot_param "dtparam=watchdog=on"
+add_boot_param "dtparam=spi=on"
+add_boot_param "dtoverlay=w1-gpio,gpiopin=4"
+
+warn "A reboot is required after setup for these hardware changes to take effect."
+
+# =============================================================================
+# STEP 2 — System packages
+# =============================================================================
+header "Installing System Packages"
+
+apt-get update -qq
+apt-get install -y --no-install-recommends \
+    git \
+    watchdog \
+    python3-pip \
+    python3-venv \
+    fonts-dejavu-core \
+    curl
+success "System packages installed"
+
+# =============================================================================
+# STEP 3 — Python dependencies
+# =============================================================================
+header "Installing Python Dependencies"
+
+pip3 install --break-system-packages \
+    gpiozero \
+    Pillow \
+    flask \
+    waitress \
+    adafruit-blinka \
+    adafruit-circuitpython-rgb-display
+success "Python dependencies installed"
+
+# =============================================================================
+# STEP 4 — Deploy source code to /opt/freezerpi/
+# =============================================================================
+header "Deploying Source Code to /opt/freezerpi/"
+
+install -d -m 755 -o "${REAL_USER}" -g "${REAL_USER}" \
+    /opt/freezerpi \
+    /opt/freezerpi/templates \
+    /opt/freezerpi/static
+
+# Python modules
+for f in config_helper.py sensor_service.py display_service.py \
+          alert_service.py db_logger.py db_maintenance.py web_server.py; do
+    if [[ -f "${SCRIPT_DIR}/${f}" ]]; then
+        install -m 644 -o "${REAL_USER}" -g "${REAL_USER}" \
+            "${SCRIPT_DIR}/${f}" "/opt/freezerpi/${f}"
+        success "Deployed: ${f}"
+    else
+        error "Missing source file: ${f}"
+        exit 1
+    fi
+done
+
+# HTML template
+install -m 644 -o "${REAL_USER}" -g "${REAL_USER}" \
+    "${SCRIPT_DIR}/templates/index.html" \
+    "/opt/freezerpi/templates/index.html"
+success "Deployed: templates/index.html"
+
+# =============================================================================
+# STEP 5 — /data directory structure
+# =============================================================================
+header "Setting Up /data Directory Structure"
+
+install -d -m 755 -o "${REAL_USER}" -g "${REAL_USER}" \
+    /data/config \
+    /data/db \
+    /data/logs
+success "/data directories created"
+
+# =============================================================================
+# STEP 6 — Configuration file
+# =============================================================================
+header "Configuration File"
+
+if [[ -f /data/config/config.ini ]]; then
+    warn "/data/config/config.ini already exists — leaving it untouched."
+    info "If you want a fresh config, delete it and re-run this script."
+else
+    install -m 640 -o "${REAL_USER}" -g "${REAL_USER}" \
+        "${SCRIPT_DIR}/config.ini.template" \
+        "/data/config/config.ini"
+    success "Copied config.ini.template → /data/config/config.ini"
+fi
+
+# =============================================================================
+# STEP 7 — Chart.js (local hosting, no CDN)
+# =============================================================================
+header "Downloading Chart.js"
+
+CHARTJS_URL="https://cdn.jsdelivr.net/npm/chart.js/dist/chart.umd.min.js"
+CHARTJS_DEST="/opt/freezerpi/static/chart.min.js"
+
+if [[ -f "${CHARTJS_DEST}" ]]; then
+    info "chart.min.js already present — skipping download."
+else
+    if curl -fsSL --connect-timeout 10 "${CHARTJS_URL}" -o "${CHARTJS_DEST}"; then
+        chown "${REAL_USER}:${REAL_USER}" "${CHARTJS_DEST}"
+        success "chart.min.js downloaded"
+    else
+        warn "Download failed. Dashboard graph will not render until you manually place"
+        warn "chart.min.js at: ${CHARTJS_DEST}"
+        warn "Download from: https://github.com/chartjs/Chart.js/releases"
+    fi
+fi
+
+# =============================================================================
+# STEP 8 — Watchdog daemon
+# =============================================================================
+header "Configuring Hardware Watchdog"
+
+WATCHDOG_CONF="/etc/watchdog.conf"
+
+# Write only the parameters we need, preserving any existing file as a backup
+if [[ -f "${WATCHDOG_CONF}" ]]; then
+    cp "${WATCHDOG_CONF}" "${WATCHDOG_CONF}.bak"
+    info "Backed up existing watchdog.conf to ${WATCHDOG_CONF}.bak"
+fi
+
+cat > "${WATCHDOG_CONF}" <<'EOF'
+watchdog-device  = /dev/watchdog
+watchdog-timeout = 15
+max-load-1       = 24
+# Trigger a hardware reboot if the sensor service stops updating the IPC file
+file   = /run/telemetry_state.json
+change = 180
+EOF
+
+systemctl enable --now watchdog
+success "Watchdog configured and enabled"
+
+# =============================================================================
+# STEP 9 — logrotate
+# =============================================================================
+header "Installing logrotate Configuration"
+
+cat > /etc/logrotate.d/freezerpi <<'EOF'
+/data/logs/db_maintenance.log {
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+}
+EOF
+
+success "logrotate configured"
+
+# =============================================================================
+# STEP 10 — systemd services
+# =============================================================================
+header "Installing systemd Services"
+
+SERVICES=(
+    freezer-sensor.service
+    freezer-display.service
+    freezer-alert.service
+    freezer-db.service
+    freezer-web.service
+)
+
+for svc in "${SERVICES[@]}"; do
+    src="${SCRIPT_DIR}/systemd/${svc}"
+    if [[ -f "${src}" ]]; then
+        install -m 644 "${src}" "/etc/systemd/system/${svc}"
+        success "Installed: ${svc}"
+    else
+        error "Missing service file: ${src}"
+        exit 1
+    fi
+done
+
+systemctl daemon-reload
+
+for svc in "${SERVICES[@]}"; do
+    systemctl enable "${svc}"
+    success "Enabled: ${svc}"
+done
+
+info "Services will start automatically on next boot."
+info "To start them now (after editing config.ini): sudo systemctl start freezer-sensor freezer-display freezer-alert freezer-db freezer-web"
+
+# =============================================================================
+# STEP 11 — CRON job for weekly database maintenance
+# =============================================================================
+header "Installing Weekly Maintenance CRON Job"
+
+CRON_JOB="0 3 * * 0 /usr/bin/python3 /opt/freezerpi/db_maintenance.py >> /data/logs/db_maintenance.log 2>&1"
+
+# Add only if not already present
+EXISTING_CRON=$(crontab -u "${REAL_USER}" -l 2>/dev/null || true)
+if echo "${EXISTING_CRON}" | grep -qF "db_maintenance.py"; then
+    info "CRON job already present — skipping."
+else
+    (echo "${EXISTING_CRON}"; echo "${CRON_JOB}") | crontab -u "${REAL_USER}" -
+    success "CRON job added for user: ${REAL_USER}"
+fi
+
+# =============================================================================
+# Done — Summary
+# =============================================================================
+echo ""
+echo -e "${BOLD}${GRN}============================================================${RST}"
+echo -e "${BOLD}${GRN}  Setup complete!${RST}"
+echo -e "${BOLD}${GRN}============================================================${RST}"
+echo ""
+echo -e "${BOLD}What was done:${RST}"
+echo  "  ✓ Hardware interfaces configured in ${BOOT_CONFIG}"
+echo  "  ✓ System packages installed"
+echo  "  ✓ Python dependencies installed"
+echo  "  ✓ Source code deployed to /opt/freezerpi/"
+echo  "  ✓ /data directory structure created"
+echo  "  ✓ Watchdog daemon configured and enabled"
+echo  "  ✓ logrotate configured"
+echo  "  ✓ Five systemd services installed and enabled"
+echo  "  ✓ Weekly CRON job scheduled for database maintenance"
+echo ""
+echo -e "${BOLD}${YEL}Required manual steps before the system will run:${RST}"
+echo ""
+echo -e "  ${BOLD}1. Edit your config file with real values:${RST}"
+echo  "       sudo nano /data/config/config.ini"
+echo  "     Required: sensor ROM IDs, Gmail address, Gmail App Password"
+echo  "     Optional: healthchecks.io UUIDs (leave as placeholders to disable)"
+echo ""
+echo -e "  ${BOLD}2. Find your DS18B20 sensor ROM IDs:${RST}"
+echo  "     Reboot first (hardware overlay needs to load), then run:"
+echo  "       ls /sys/bus/w1/devices/"
+echo  "     Look for entries starting with '28-'. Each is one sensor."
+echo ""
+echo -e "  ${BOLD}3. Reboot to activate hardware changes:${RST}"
+echo  "       sudo reboot"
+echo ""
+echo -e "  ${BOLD}4. After reboot, start the services:${RST}"
+echo  "       sudo systemctl start freezer-sensor freezer-display freezer-alert freezer-db freezer-web"
+echo ""
+echo -e "  ${BOLD}5. Verify everything is working, then enable the read-only overlay:${RST}"
+echo  "       sudo raspi-config → Performance Options → Overlay File System → Enable"
+echo  "     Do this LAST. Once enabled, the root filesystem is read-only."
+echo ""
+echo -e "  ${BOLD}Useful diagnostics:${RST}"
+echo  "       journalctl -u freezer-sensor.service -f"
+echo  "       cat /run/telemetry_state.json"
+echo  "       systemctl status 'freezer-*'"
+echo ""

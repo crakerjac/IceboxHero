@@ -155,23 +155,51 @@ Both URLs are optional. Leave them as the placeholder value in `config.ini` to d
 
 ## Installation
 
-### 1. Prepare the SD Card
+### Step 1 — Prevent Auto-Expand and Create the /data Partition (one-time, manual)
 
-Create a three-partition layout:
+This is the only step that cannot be automated. `fdisk` is destructive and must be run deliberately.
 
-```
-p1  /boot    FAT32   (existing)
-p2  /        ext4    (existing — will become read-only after setup)
-p3  /data    ext4    (new)
-```
+#### 1a. Disable Auto-Expand Before First Boot
+
+By default, Raspberry Pi OS expands the root partition (`p2`) to fill the entire SD card on first boot. You must prevent this **before the Pi boots for the first time** to leave unallocated space for the `/data` partition (`p3`).
+
+1. Flash Raspberry Pi OS Lite (64-bit recommended) to your SD card using [Raspberry Pi Imager](https://www.raspberrypi.com/software/).
+2. Remove and re-insert the SD card into your PC. The `bootfs` FAT32 volume will mount automatically.
+3. Open `cmdline.txt` in a text editor.
+4. Find and **delete** this exact string (leave everything else on the line intact):
+   ```
+   init=/usr/lib/raspi-config/init_resize.sh
+   ```
+5. Save the file, eject the SD card, and insert it into the Pi. Boot normally.
+
+> If you skip this step and the root partition has already been expanded to fill the card, you will need to shrink `p2` with a partition tool before you can create `p3`. It is much easier to do this before first boot.
+
+#### 1b. Create the /data Partition
+
+Once booted and logged in, you will have unallocated space after `p2`. Use `fdisk` to create `p3`:
 
 ```bash
-sudo fdisk /dev/mmcblk0          # create p3
+sudo fdisk /dev/mmcblk0
+```
+
+At the `fdisk` prompt:
+```
+Command: n          # new partition
+Type:    p          # primary
+Number:  3          # partition number
+First sector:       # press Enter to accept default (first available sector)
+Last sector:        # press Enter to accept default (rest of the drive)
+Command: w          # write and exit
+```
+
+Format, mount, and set permissions:
+
+```bash
 sudo mkfs.ext4 /dev/mmcblk0p3
 sudo mkdir -p /data/config /data/db /data/logs
 ```
 
-Add to `/etc/fstab`:
+Add to `/etc/fstab` so it mounts automatically on every boot:
 ```
 /dev/mmcblk0p3  /data  ext4  defaults,noatime  0  2
 ```
@@ -181,65 +209,44 @@ sudo mount -a
 sudo chown -R pi:pi /data
 ```
 
-### 2. Enable Hardware Interfaces
+Verify: `mountpoint /data` should print `/data is a mountpoint`.
 
-Add to `/boot/firmware/config.txt` (use `/boot/config.txt` on older OS versions):
-```ini
-dtparam=watchdog=on
-dtparam=spi=on
-dtoverlay=w1-gpio,gpiopin=4
-```
-
-Reboot after making these changes.
-
-### 3. Install System Packages
+### Step 2 — Clone and run setup
 
 ```bash
-sudo apt update
-sudo apt install watchdog python3-pip python3-venv
+git clone git@github.com:crakerjac/freezerPi.git
+cd freezerPi
+sudo ./setup.sh
 ```
 
-Configure the watchdog daemon. Edit `/etc/watchdog.conf` and add/uncomment:
-```ini
-watchdog-device = /dev/watchdog
-watchdog-timeout = 15
-max-load-1 = 24
-file = /run/telemetry_state.json
-change = 180
-```
+`setup.sh` handles everything else automatically:
+
+- Hardware interfaces (`/boot/firmware/config.txt` — watchdog, SPI, 1-Wire)
+- System packages and Python dependencies
+- Source code deployment to `/opt/freezerpi/`
+- Chart.js download for the local dashboard
+- Watchdog daemon configuration
+- logrotate configuration
+- All five systemd services (installed and enabled)
+- Weekly CRON job for database maintenance
+
+### Step 3 — Edit config.ini
+
+The script copies the template and then stops so you can fill in your values:
 
 ```bash
-sudo systemctl enable --now watchdog
+sudo nano /data/config/config.ini
 ```
 
-Configure log rotation. Create `/etc/logrotate.d/freezerpi`:
-```
-/data/logs/db_maintenance.log {
-    weekly
-    rotate 4
-    compress
-    missingok
-    notifempty
-}
-```
+Required changes:
 
-### 4. Deploy Source Code
+- `[sensors]` — Replace placeholder ROM IDs with your actual DS18B20 addresses. **Reboot first** so the 1-Wire overlay loads, then find them at `/sys/bus/w1/devices/`. Look for entries starting with `28-`.
+- `[email]` — Your Gmail address and [App Password](https://myaccount.google.com/apppasswords) (required if 2FA is enabled).
+- `[network]` — Your two healthchecks.io ping URLs, or leave as placeholders to disable.
 
-```bash
-sudo mkdir -p /opt/freezerpi/static /opt/freezerpi/templates
-sudo cp *.py /opt/freezerpi/
-sudo cp templates/index.html /opt/freezerpi/templates/
-sudo chown -R pi:pi /opt/freezerpi
-```
+> `config.ini` is excluded from git via `.gitignore`. Your live file with real credentials stays on the Pi and will never be accidentally committed.
 
-### 5. Install Python Dependencies
-
-```bash
-pip install gpiozero Pillow flask waitress
-pip install adafruit-blinka adafruit-circuitpython-rgb-display
-```
-
-> **ST7735S Display Note:** The Adafruit library supports multiple ST7735 panel variants with different init sequences. Identify yours by the colored tab on the flex cable ribbon where it meets the PCB:
+> **ST7735S Display Note:** Identify your panel variant by the colored tab on the flex cable ribbon where it meets the PCB, and wire the driver stub in `display_service.py` accordingly:
 >
 > | Tab Color | Constructor |
 > |---|---|
@@ -248,62 +255,31 @@ pip install adafruit-blinka adafruit-circuitpython-rgb-display
 > | Green | `st7735.ST7735R(spi, ..., bgr=True)` + possible x/y offsets |
 > | 0.96" 80×160 | Add `width=80, height=160, x_offset=26, y_offset=1` |
 >
-> After wiring, flash a solid red frame. If it shows as blue, add `bgr=True`. Reference: [Adafruit ST7735 driver source](https://github.com/adafruit/Adafruit_CircuitPython_RGB_Display/blob/main/adafruit_rgb_display/st7735.py)
+> After wiring, flash a solid red frame. If it renders as blue, add `bgr=True`.
 
-### 6. Configure the System
-
-The repo contains `config.ini.template` with placeholder values. Copy it to its runtime location and edit:
+### Step 4 — Reboot, then start services
 
 ```bash
-cp config.ini.template /data/config/config.ini
-nano /data/config/config.ini
+sudo reboot
 ```
 
-> `config.ini` is excluded from git via `.gitignore`. Your live file with real credentials stays local and will never be accidentally committed. Always edit `/data/config/config.ini` — never the template.
-
-Required edits:
-
-- `[sensors]` — Replace placeholder ROM IDs with your actual DS18B20 addresses. Find them at `/sys/bus/w1/devices/` after wiring with the overlay enabled.
-- `[email]` — Set your Gmail address and [App Password](https://myaccount.google.com/apppasswords) (required if 2FA is enabled).
-- `[network]` — Set your two healthchecks.io UUIDs, or leave as placeholders to disable.
-
-### 7. Install Chart.js Locally
-
-The dashboard requires Chart.js served from local storage — it must work when the internet is down.
-
+After reboot:
 ```bash
-# Download chart.min.js from https://github.com/chartjs/Chart.js/releases
-# Place it at:
-/opt/freezerpi/static/chart.min.js
+sudo systemctl start freezer-sensor freezer-display freezer-alert freezer-db freezer-web
+systemctl status 'freezer-*'
+cat /run/telemetry_state.json
 ```
 
-### 8. Install and Enable systemd Services
+### Step 5 — Enable read-only root filesystem (last)
 
-```bash
-sudo cp systemd/*.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable freezer-sensor freezer-display freezer-alert freezer-db freezer-web
-sudo systemctl start  freezer-sensor freezer-display freezer-alert freezer-db freezer-web
-```
-
-### 9. Schedule Weekly Database Maintenance
-
-```bash
-crontab -e
-# Add the following line:
-0 3 * * 0 /usr/bin/python3 /opt/freezerpi/db_maintenance.py >> /data/logs/db_maintenance.log 2>&1
-```
-
-### 10. Enable Read-Only Root Filesystem (Final Step)
-
-Only do this after everything is fully tested and running:
+Only after everything is verified working:
 
 ```bash
 sudo raspi-config
-# Navigate to: Performance Options → Overlay File System → Enable
+# Performance Options → Overlay File System → Enable
 ```
 
-The `/data` partition defined in `/etc/fstab` bypasses the overlay and remains writable. The root partition becomes read-only, protecting the OS from SD card corruption on sudden power loss.
+The `/data` partition bypasses the overlay and remains writable. The root partition becomes read-only, protecting the OS from SD card corruption on sudden power loss. Do this step last — it is difficult to make further system changes once enabled.
 
 ---
 
@@ -334,6 +310,7 @@ freezerpi/
 ├── README.md
 ├── LICENSE
 ├── .gitignore
+├── setup.sh                     # Automated setup script — run after Step 1
 ├── config.ini.template          # Configuration template — copy to /data/config/config.ini
 ├── config_helper.py             # Shared config parser          (Module 0)
 ├── sensor_service.py            # DS18B20 acquisition service   (Module 2)
