@@ -263,12 +263,12 @@ Required changes:
 sudo reboot
 ```
 
-After reboot:
+After reboot, connect your sensors if not already done, then:
 ```bash
-sudo systemctl start freezer-sensor freezer-display freezer-alert freezer-db freezer-web
-systemctl status 'freezer-*'
-cat /run/telemetry_state.json
+sudo ./start_services.sh
 ```
+
+This confirms sensors are detected, starts all five services, then arms the watchdog last. The script prints a live status summary — all five services and the watchdog should show as active (green) before proceeding.
 
 ### Step 5 — Enable read-only root filesystem (last)
 
