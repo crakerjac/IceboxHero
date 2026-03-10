@@ -36,10 +36,15 @@ IPC_TEMP = "/run/freezerpi/telemetry_state.tmp"
 
 
 def write_ipc(sensor_data):
-    """Atomically writes sensor data to the IPC file."""
+    """Atomically writes sensor data to the IPC file.
+
+    Intentionally omits the 'monotonic' field — that field is only valid
+    within the long-running sensor_service.py process. Including a monotonic
+    value from a short-lived mock process would cause alert_service to
+    falsely trigger SYSTEM_FREEZE detection on every run.
+    """
     payload = {
         "timestamp": int(time.time()),
-        "monotonic": time.monotonic(),
         "sensors": sensor_data,
     }
     try:
