@@ -1,7 +1,7 @@
 """
 Module 5 — Database Logger (db_logger.py)
 
-Reads /run/telemetry_state.json every 5 minutes and inserts valid readings
+Reads /run/freezerpi/telemetry_state.json every 5 minutes and inserts valid readings
 into a SQLite database that lives entirely in RAM (/run/freezer_db/).
 
 SD card write strategy:
@@ -40,8 +40,8 @@ DB_DIR          = "/data/db"
 DB_FILE         = os.path.join(DB_DIR, "freezer_monitor.db")        # SD card backup
 RAM_DB_DIR      = "/run/freezer_db"
 RAM_DB_FILE     = os.path.join(RAM_DB_DIR, "freezer_monitor.db")    # Live runtime DB
-IPC_FILE        = "/run/telemetry_state.json"
-DB_CORRUPT_FLAG = "/run/db_corrupted.flag"
+IPC_FILE        = "/run/freezerpi/telemetry_state.json"
+DB_CORRUPT_FLAG = "/run/freezerpi/db_corrupted.flag"
 
 POLL_INTERVAL_SECONDS = config.getint('sampling', 'db_commit_interval')
 NTP_SYNC_YEAR         = config.getint('system', 'ntp_sync_year')

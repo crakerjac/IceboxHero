@@ -18,6 +18,7 @@
 #   - Copies config template to /data/config/config.ini (if not present)
 #   - Downloads Chart.js for the local web dashboard
 #   - Configures /boot/firmware/config.txt (watchdog, SPI, 1-Wire)
+#   - Installs tmpfiles.d config (/run/freezerpi and /run/freezer_db owned by pi)
 #   - Configures /etc/watchdog.conf
 #   - Installs logrotate configuration
 #   - Installs and enables all five systemd services
@@ -309,7 +310,7 @@ watchdog-device  = /dev/watchdog
 watchdog-timeout = 15
 max-load-1       = 24
 # Trigger a hardware reboot if the sensor service stops updating the IPC file
-file   = /run/telemetry_state.json
+file   = /run/freezerpi/telemetry_state.json
 change = 180
 EOF
 
@@ -339,7 +340,23 @@ EOF
 success "logrotate configured"
 
 # =============================================================================
-# STEP 10 — systemd services
+# STEP 10 — tmpfiles.d runtime directories
+# =============================================================================
+header "Installing tmpfiles.d Configuration"
+
+# FreezerPi services run as the unprivileged 'pi' user but need to write
+# to /run, which is owned by root and not world-writable. The systemd-tmpfiles
+# mechanism creates these directories at every boot before services start,
+# owned by pi, so no service needs to run as root.
+install -m 644 "${SCRIPT_DIR}/freezerpi-tmpfiles.conf" \
+    /etc/tmpfiles.d/freezerpi.conf
+
+# Apply immediately so services can start without a reboot
+systemd-tmpfiles --create /etc/tmpfiles.d/freezerpi.conf
+success "tmpfiles.d configuration installed (/run/freezerpi and /run/freezer_db created)"
+
+# =============================================================================
+# STEP 11 — systemd services
 # =============================================================================
 header "Installing systemd Services"
 
@@ -370,10 +387,10 @@ for svc in "${SERVICES[@]}"; do
 done
 
 info "Services will start automatically on next boot."
-info "To start them now (after editing config.ini): sudo systemctl start freezer-sensor freezer-display freezer-alert freezer-db freezer-web"
+info "To start them now (after editing config.ini): sudo ./start_services.sh"
 
 # =============================================================================
-# STEP 11 — CRON job for weekly database maintenance
+# STEP 12 — CRON job for weekly database maintenance
 # =============================================================================
 header "Installing Weekly Maintenance CRON Job"
 
@@ -403,6 +420,7 @@ echo  "  ✓ Python dependencies installed"
 echo  "  ✓ Source code deployed to /opt/freezerpi/"
 echo  "  ✓ /data directory structure created"
 echo  "  ✓ Watchdog daemon configured and enabled (NOT started — armed by start_services.sh)"
+echo  "  ✓ tmpfiles.d configured (/run/freezerpi and /run/freezer_db created, pi-owned)"
 echo  "  ✓ logrotate configured"
 echo  "  ✓ Five systemd services installed and enabled"
 echo  "  ✓ Weekly CRON job scheduled for database maintenance"
@@ -422,8 +440,9 @@ echo ""
 echo -e "  ${BOLD}3. Reboot to activate hardware changes:${RST}"
 echo  "       sudo reboot"
 echo ""
-echo -e "  ${BOLD}4. After reboot, start the services:${RST}"
-echo  "       sudo systemctl start freezer-sensor freezer-display freezer-alert freezer-db freezer-web"
+echo -e "  ${BOLD}4. Connect sensors, then start all services:${RST}"
+echo  "       sudo ./start_services.sh"
+echo  "     This confirms sensors are detected, starts all services, and arms the watchdog last."
 echo ""
 echo -e "  ${BOLD}5. Verify everything is working, then enable the read-only overlay:${RST}"
 echo  "       sudo raspi-config → Performance Options → Overlay File System → Enable"
@@ -431,6 +450,6 @@ echo  "     Do this LAST. Once enabled, the root filesystem is read-only."
 echo ""
 echo -e "  ${BOLD}Useful diagnostics:${RST}"
 echo  "       journalctl -u freezer-sensor.service -f"
-echo  "       cat /run/telemetry_state.json"
+echo  "       cat /run/freezerpi/telemetry_state.json"
 echo  "       systemctl status 'freezer-*'"
 echo ""

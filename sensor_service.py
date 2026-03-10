@@ -19,8 +19,8 @@ import json
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from config_helper import load_config
 
-IPC_TEMP_FILE = "/run/telemetry_state.tmp"
-IPC_FILE      = "/run/telemetry_state.json"
+IPC_TEMP_FILE = "/run/freezerpi/telemetry_state.tmp"
+IPC_FILE      = "/run/freezerpi/telemetry_state.json"
 BASE_DIR      = '/sys/bus/w1/devices/'
 
 # max_workers matches max expected sensors so reads run in parallel.

@@ -143,6 +143,6 @@ done
 echo ""
 echo -e "${BOLD}Useful diagnostics:${RST}"
 echo  "  journalctl -u freezer-sensor.service -f"
-echo  "  cat /run/telemetry_state.json"
+echo  "  cat /run/freezerpi/telemetry_state.json"
 echo  "  systemctl status 'freezer-*'"
 echo ""

@@ -1,7 +1,7 @@
 """
 Module 3 — Display Service (display_service.py)
 
-Reads /run/telemetry_state.json every 500 ms and renders the current
+Reads /run/freezerpi/telemetry_state.json every 500 ms and renders the current
 temperature state to the ST7735S LCD via Pillow frame-buffer rendering.
 
 Display states:
@@ -27,7 +27,7 @@ from config_helper import load_config
 # import board, busio, digitalio
 # import adafruit_rgb_display.st7735 as st7735
 
-IPC_FILE  = "/run/telemetry_state.json"
+IPC_FILE  = "/run/freezerpi/telemetry_state.json"
 WIDTH     = 160
 HEIGHT    = 128
 FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"

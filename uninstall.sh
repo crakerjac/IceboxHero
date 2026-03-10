@@ -8,6 +8,7 @@
 #   - All five systemd services (stopped, disabled, unit files deleted)
 #   - Weekly CRON job for database maintenance
 #   - logrotate configuration
+#   - /etc/tmpfiles.d/freezerpi.conf (runtime directory config)
 #   - /opt/freezerpi/ deployment directory
 #   - /data/config/config.ini  (your working config — see warning below)
 #   - Python packages installed by setup.sh
@@ -118,6 +119,22 @@ if [[ -f /etc/logrotate.d/freezerpi ]]; then
 else
     info "Not found — skipping"
 fi
+
+# =============================================================================
+# STEP 3b — Remove tmpfiles.d configuration
+# =============================================================================
+header "Removing tmpfiles.d Configuration"
+
+if [[ -f /etc/tmpfiles.d/freezerpi.conf ]]; then
+    rm /etc/tmpfiles.d/freezerpi.conf
+    success "Removed: /etc/tmpfiles.d/freezerpi.conf"
+else
+    info "Not found — skipping"
+fi
+
+# Clean up the runtime directories if they still exist
+rm -rf /run/freezerpi /run/freezer_db 2>/dev/null || true
+info "Removed /run/freezerpi and /run/freezer_db (if present)"
 
 # =============================================================================
 # STEP 4 — Remove deployed source code
@@ -239,6 +256,7 @@ echo -e "${BOLD}What was removed:${RST}"
 echo  "  ✓ All five systemd services stopped, disabled, and deleted"
 echo  "  ✓ Weekly CRON job removed"
 echo  "  ✓ logrotate configuration removed"
+echo  "  ✓ /etc/tmpfiles.d/freezerpi.conf removed"
 echo  "  ✓ /opt/freezerpi/ deleted"
 echo  "  ✓ /data/config/config.ini deleted"
 echo  "  ✓ Python packages uninstalled"
@@ -252,4 +270,7 @@ echo  "  - /data/db/, /data/logs/ (your historical data)"
 echo  "  - git, curl, python3-pip, python3-venv, fonts-dejavu-core"
 echo  "  - dtparam=spi=on in ${BOOT_CONFIG:-/boot/firmware/config.txt}"
 echo  "  - watchdog package itself (apt package, not worth removing)"
+echo ""
+echo -e "${BOLD}You can now re-run setup.sh cleanly:${RST}"
+echo  "  sudo ./setup.sh"
 echo ""

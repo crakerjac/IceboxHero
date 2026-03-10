@@ -13,7 +13,7 @@ Key behaviors:
   - [ALERT] prefix for actionable alerts; [STATUS] prefix for informational boots.
   - email_alive ping fires after each successful send to verify SMTP health independently.
   - Sensor freeze detection: buzzer triggers if IPC monotonic clock stops advancing.
-  - DB corruption flag (/run/db_corrupted.flag): consumed once and converted to an email.
+  - DB corruption flag (/run/freezerpi/db_corrupted.flag): consumed once and converted to an email.
 """
 
 import os
@@ -32,7 +32,7 @@ from config_helper import load_config
 
 config = load_config()
 
-IPC_FILE                 = "/run/telemetry_state.json"
+IPC_FILE                 = "/run/freezerpi/telemetry_state.json"
 STALE_THRESHOLD_SECONDS  = config.getint('display', 'stale_timeout')
 SILENCE_DURATION_SECONDS = config.getint('alerts', 'silence_duration')
 EMAIL_COOLDOWN_SECONDS   = config.getint('alerts', 'email_cooldown')
@@ -209,7 +209,7 @@ def main():
     email_thread = threading.Thread(target=process_email_queue, daemon=True)
     email_thread.start()
 
-    DB_CORRUPT_FLAG   = "/run/db_corrupted.flag"
+    DB_CORRUPT_FLAG   = "/run/freezerpi/db_corrupted.flag"
     last_ipc_timestamp = 0
 
     while True:

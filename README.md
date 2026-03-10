@@ -283,6 +283,42 @@ The `/data` partition bypasses the overlay and remains writable. The root partit
 
 ---
 
+## Web Dashboard
+
+Once services are running, the dashboard is accessible from any browser on your local network.
+
+### Finding Your Pi's Address
+
+The easiest way is by hostname — Raspberry Pi OS advertises itself via mDNS by default:
+
+```
+http://freezerpi.local:8080
+```
+
+If that doesn't resolve (some Windows networks block mDNS), find the IP address directly on the Pi:
+
+```bash
+hostname -I
+```
+
+Then navigate to `http://<ip-address>:8080` from any device on the same network.
+
+The port is configurable in `config.ini` under `[network] → web_port`.
+
+### What the Dashboard Shows
+
+- **Current temperatures** — one card per sensor, color-coded to match the physical display (green = normal, yellow = warning, red = critical). Updates every 30 seconds from the RAM disk IPC file.
+- **24-hour history graph** — line chart per sensor, pulled directly from the SQLite database. Refreshes every 5 minutes to match the database commit interval.
+
+### Notes
+
+- The dashboard is **read-only** — there are no controls, only monitoring.
+- Chart.js is served locally from `/opt/freezerpi/static/chart.min.js` — the dashboard loads instantly and works fully during an internet outage.
+- Timestamps on the graph are stored in UTC in SQLite and converted to your browser's local timezone automatically for display.
+- The dashboard is served on all network interfaces (`0.0.0.0`). It is intended for use on a trusted private network only — there is no authentication.
+
+---
+
 ## Operations
 
 ### Starting and Stopping Services
@@ -364,6 +400,7 @@ freezerpi/
 ├── web_server.py                # Flask API and dashboard       (Module 6)
 ├── templates/
 │   └── index.html               # Web dashboard UI
+├── freezerpi-tmpfiles.conf      # Creates /run/freezerpi and /run/freezer_db at boot
 └── systemd/
     ├── freezer-sensor.service
     ├── freezer-display.service

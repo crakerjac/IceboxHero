@@ -3,7 +3,7 @@ Module 6 — Web Server & Dashboard (web_server.py)
 
 Serves a local Flask dashboard on port 8080 (configurable).
 Two data sources:
-  - /api/current  → reads /run/telemetry_state.json (RAM, updates every 60 s)
+  - /api/current  → reads /run/freezerpi/telemetry_state.json (RAM, updates every 60 s)
   - /api/history  → queries the RAM SQLite database for the last 24 hours
 
 The dashboard JS polls /api/current every 30 seconds and /api/history every
@@ -22,7 +22,7 @@ from config_helper import load_config
 app = Flask(__name__)
 
 config       = load_config()
-IPC_FILE     = "/run/telemetry_state.json"
+IPC_FILE     = "/run/freezerpi/telemetry_state.json"
 DB_FILE      = "/run/freezer_db/freezer_monitor.db"   # Live RAM database
 WEB_PORT     = config.getint('network', 'web_port')
 TEMP_WARNING  = config.getfloat('sampling', 'temp_warning')
