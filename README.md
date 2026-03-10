@@ -455,6 +455,8 @@ freezerpi/
 ├── mock_sensors.py              # Dev tool — simulates sensors without hardware
 ├── templates/
 │   └── index.html               # Web dashboard UI
+├── static/
+│   └── favicon.png              # Browser tab icon (burning freezer)
 └── systemd/
     ├── freezer-sensor.service
     ├── freezer-display.service

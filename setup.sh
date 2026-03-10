@@ -245,6 +245,14 @@ install -m 644 -o "${REAL_USER}" -g "${REAL_USER}" \
     "/opt/freezerpi/templates/index.html"
 success "Deployed: templates/index.html"
 
+# Static assets
+if [[ -f "${SCRIPT_DIR}/static/favicon.png" ]]; then
+    install -m 644 -o "${REAL_USER}" -g "${REAL_USER}" \
+        "${SCRIPT_DIR}/static/favicon.png" \
+        "/opt/freezerpi/static/favicon.png"
+    success "Deployed: static/favicon.png"
+fi
+
 # =============================================================================
 # STEP 5 — /data directory structure
 # =============================================================================
