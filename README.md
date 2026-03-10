@@ -359,6 +359,60 @@ sudo ./setup.sh
 
 ---
 
+## Testing Without Hardware
+
+`mock_sensors.py` replaces `sensor_service.py` for testing before physical sensors arrive. It reads sensor names and thresholds from `config.ini` and writes the same IPC file format all downstream services consume — they can't tell the difference.
+
+### Setup
+
+Stop `freezer-sensor.service` first to avoid racing on the IPC file, then run the mock directly:
+
+```bash
+sudo systemctl stop freezer-sensor.service
+
+# From the repo directory:
+python3 mock_sensors.py --mode sine
+
+# Or if already deployed by setup.sh:
+python3 /opt/freezerpi/mock_sensors.py --mode sine
+```
+
+By default the mock uses `poll_interval` from `config.ini` (60 seconds). Use `--interval` to override this for faster testing:
+
+```bash
+# Update every second — good for watching ramp and state transitions in real time
+python3 mock_sensors.py --mode ramp --interval 1
+
+# Match actual sensor polling without waiting a full minute per step
+python3 mock_sensors.py --mode sine --interval 5
+```
+
+Note that `--interval` only controls how fast the mock writes the IPC file. The downstream services (`display_service`, `alert_service`, `db_logger`) still run on their own timers — `db_logger` won't commit faster than `db_commit_interval` regardless.
+
+### Modes
+
+| Mode | What it does |
+|---|---|
+| `sine` (default) | Slow sine wave drifting from normal through warning and critical |
+| `normal` | Steady 8°F below warning threshold |
+| `warning` | Steady 1°F above warning threshold |
+| `critical` | Steady 2°F above critical threshold — triggers buzzer and email after 2 reads |
+| `missing` | First sensor returns `None` — triggers FAILURE alert and buzzer |
+| `ramp` | Ramps up 1°F per poll cycle, wraps at critical+5 — good for watching state transitions |
+
+### What You Can Test
+
+- **Display** — correct colors, 1 Hz flash at CRITICAL, font sizing, STALE DATA overlay
+- **Alerts** — buzzer fires at correct threshold, silence button mutes it, re-arms after 1 hour
+- **Email** — CRITICAL and WARNING emails arrive, cooldown prevents flooding, SYSTEM_BOOT on start
+- **Web dashboard** — current readings update every 30s, 24-hour graph populates over time
+- **Database** — RAM DB writes every 5 minutes, 4-hour SD backup fires, web history graph works
+- **Watchdog** — stays quiet while IPC updates; kill the mock script and verify reboot after 180s
+
+Stop the mock with `Ctrl+C`. The IPC file is left in place so downstream services don't immediately go stale — they will naturally time out after `stale_timeout` seconds (default: 600).
+
+---
+
 ## Diagnostics
 
 ```bash
@@ -398,9 +452,9 @@ freezerpi/
 ├── db_logger.py                 # RAM SQLite DB + SD backup     (Module 5)
 ├── db_maintenance.py            # Weekly CRON pruning script    (Module 5)
 ├── web_server.py                # Flask API and dashboard       (Module 6)
+├── mock_sensors.py              # Dev tool — simulates sensors without hardware
 ├── templates/
 │   └── index.html               # Web dashboard UI
-├── freezerpi-tmpfiles.conf      # Creates /run/freezerpi and /run/freezer_db at boot
 └── systemd/
     ├── freezer-sensor.service
     ├── freezer-display.service

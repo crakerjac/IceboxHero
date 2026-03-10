@@ -54,7 +54,7 @@ echo ""
 echo -e "${YEL}WARNING: /data/config/config.ini will be deleted.${RST}"
 echo    "         Back it up first if you want to keep your sensor ROM IDs"
 echo    "         and credentials:"
-echo    "           cp /data/config/config.ini ~/config.ini.bak"
+echo    "           cp /data/config/config.ini /data/config/config.ini.save"
 echo ""
 read -r -p "Continue? [y/N] " confirm
 if [[ ! "${confirm}" =~ ^[Yy]$ ]]; then
@@ -202,6 +202,10 @@ success "Build dependency packages removed"
 # =============================================================================
 header "Restoring /etc/watchdog.conf"
 
+systemctl stop watchdog 2>/dev/null || true
+systemctl disable watchdog 2>/dev/null || true
+info "Watchdog stopped and disabled"
+
 if [[ -f /etc/watchdog.conf.bak ]]; then
     mv /etc/watchdog.conf.bak /etc/watchdog.conf
     success "Restored /etc/watchdog.conf from backup"
@@ -270,7 +274,4 @@ echo  "  - /data/db/, /data/logs/ (your historical data)"
 echo  "  - git, curl, python3-pip, python3-venv, fonts-dejavu-core"
 echo  "  - dtparam=spi=on in ${BOOT_CONFIG:-/boot/firmware/config.txt}"
 echo  "  - watchdog package itself (apt package, not worth removing)"
-echo ""
-echo -e "${BOLD}You can now re-run setup.sh cleanly:${RST}"
-echo  "  sudo ./setup.sh"
 echo ""

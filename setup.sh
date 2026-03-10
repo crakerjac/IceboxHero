@@ -228,7 +228,7 @@ install -d -m 755 -o "${REAL_USER}" -g "${REAL_USER}" \
 
 # Python modules
 for f in config_helper.py sensor_service.py display_service.py \
-          alert_service.py db_logger.py db_maintenance.py web_server.py; do
+          alert_service.py db_logger.py db_maintenance.py web_server.py mock_sensors.py; do
     if [[ -f "${SCRIPT_DIR}/${f}" ]]; then
         install -m 644 -o "${REAL_USER}" -g "${REAL_USER}" \
             "${SCRIPT_DIR}/${f}" "/opt/freezerpi/${f}"
@@ -314,13 +314,13 @@ file   = /run/freezerpi/telemetry_state.json
 change = 180
 EOF
 
-# Enable the watchdog service so it can be started later, but do NOT start
-# it now. The watchdog monitors the IPC file for updates — if sensors are
-# not connected yet, it will trigger a reboot loop. start_services.sh arms
-# the watchdog only after confirming sensors are present and services are up.
-systemctl enable watchdog
+# Do NOT enable or start the watchdog here. The watchdog monitors the IPC
+# file for updates — if sensors are not connected yet, it will trigger a
+# reboot loop. start_services.sh arms the watchdog only after confirming
+# sensors are present and services are up.
+systemctl disable watchdog 2>/dev/null || true
 systemctl stop watchdog 2>/dev/null || true
-success "Watchdog configured and enabled (not yet started — run start_services.sh)"
+success "Watchdog configured (disabled — armed by start_services.sh)"
 
 # =============================================================================
 # STEP 9 — logrotate
@@ -348,8 +348,14 @@ header "Installing tmpfiles.d Configuration"
 # to /run, which is owned by root and not world-writable. The systemd-tmpfiles
 # mechanism creates these directories at every boot before services start,
 # owned by pi, so no service needs to run as root.
-install -m 644 "${SCRIPT_DIR}/freezerpi-tmpfiles.conf" \
-    /etc/tmpfiles.d/freezerpi.conf
+cat > /etc/tmpfiles.d/freezerpi.conf <<'EOF'
+# /etc/tmpfiles.d/freezerpi.conf
+# Creates runtime directories in /run owned by the pi user at every boot.
+# /run/freezerpi  — IPC state file, corruption flag
+# /run/freezer_db — live SQLite RAM database
+d /run/freezerpi   0755 pi pi -
+d /run/freezer_db  0755 pi pi -
+EOF
 
 # Apply immediately so services can start without a reboot
 systemd-tmpfiles --create /etc/tmpfiles.d/freezerpi.conf
@@ -419,7 +425,7 @@ echo  "  ✓ System packages installed"
 echo  "  ✓ Python dependencies installed"
 echo  "  ✓ Source code deployed to /opt/freezerpi/"
 echo  "  ✓ /data directory structure created"
-echo  "  ✓ Watchdog daemon configured and enabled (NOT started — armed by start_services.sh)"
+echo  "  ✓ Watchdog daemon configured (disabled — armed by start_services.sh)"
 echo  "  ✓ tmpfiles.d configured (/run/freezerpi and /run/freezer_db created, pi-owned)"
 echo  "  ✓ logrotate configured"
 echo  "  ✓ Five systemd services installed and enabled"
