@@ -26,7 +26,7 @@
 #
 # What you must do manually (before running this script):
 #   - Create and mount the /data ext4 partition (see README Step 1)
-#   - Add /dev/mmcblk0p3 to /etc/fstab (see README Step 1)
+#   - Add /dev/mmcblk0p3 to /etc/fstab is NOT required — data.mount handles it
 #
 # What you must do manually (after running this script):
 #   - Edit /data/config/config.ini with your sensor ROM IDs and credentials
@@ -379,10 +379,21 @@ success "tmpfiles.d configuration installed (/run/freezerpi and /run/freezer_db 
 header "Installing systemd Services"
 
 # data.mount — makes /data a real persistent partition even with overlayroot enabled.
-# The overlayroot initramfs overlays /data by default; this unit mounts the real
-# device over the overlay mount so config, DB, and logs survive reboots.
+# The overlayroot initramfs overlays every fstab entry it finds. The fix is to
+# remove /data from fstab entirely so initramfs never sees it, then let this
+# systemd unit mount it directly after handoff to systemd.
 install -m 644 "${SCRIPT_DIR}/systemd/data.mount" "/etc/systemd/system/data.mount"
 success "Installed: data.mount"
+
+# Remove /data from /etc/fstab if present — data.mount takes over from here
+if grep -q "mmcblk0p3\|[[:space:]]/data[[:space:]]" /etc/fstab; then
+    cp /etc/fstab /etc/fstab.pre-freezerpi.bak
+    sed -i '/[[:space:]]\/data[[:space:]]/d' /etc/fstab
+    sed -i '/mmcblk0p3/d' /etc/fstab
+    success "Removed /data entry from /etc/fstab (backup: /etc/fstab.pre-freezerpi.bak)"
+else
+    info "/data not in /etc/fstab — nothing to remove"
+fi
 
 SERVICES=(
     freezer-sensor.service

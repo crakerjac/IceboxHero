@@ -21,10 +21,19 @@ from config_helper import load_config
 
 app = Flask(__name__)
 
-config       = load_config()
-IPC_FILE     = "/run/freezerpi/telemetry_state.json"
-DB_FILE      = "/run/freezer_db/freezer_monitor.db"   # Live RAM database
-WEB_PORT     = config.getint('network', 'web_port')
+VERSION_FILE = os.path.join(os.path.dirname(__file__), 'VERSION')
+
+def get_version():
+    try:
+        with open(VERSION_FILE) as f:
+            return f.read().strip()
+    except Exception:
+        return 'unknown'
+
+config        = load_config()
+IPC_FILE      = "/run/freezerpi/telemetry_state.json"
+DB_FILE       = "/run/freezer_db/freezer_monitor.db"   # Live RAM database
+WEB_PORT      = config.getint('network', 'web_port')
 TEMP_WARNING  = config.getfloat('sampling', 'temp_warning')
 TEMP_CRITICAL = config.getfloat('sampling', 'temp_critical')
 
@@ -82,7 +91,7 @@ def get_24h_history():
 @app.route('/')
 def index():
     """Serves the main dashboard, injecting threshold values from config."""
-    return render_template('index.html', warning=TEMP_WARNING, critical=TEMP_CRITICAL)
+    return render_template('index.html', warning=TEMP_WARNING, critical=TEMP_CRITICAL, version=get_version())
 
 
 @app.route('/api/current')

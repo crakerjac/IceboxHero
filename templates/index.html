@@ -16,6 +16,10 @@
         .status-critical{ color: #f44336; }
         .chart-container{ background-color: #1e1e1e; padding: 20px; border-radius: 8px; height: 400px; }
 
+        .footer         { margin-top: 20px; text-align: right; color: #555; font-size: 0.75em; }
+
+        .footer         { margin-top: 30px; text-align: center; font-size: 0.75em; color: #555; }
+
         @media (max-width: 768px) {
             body            { padding: 12px; }
             .grid           { flex-direction: column; gap: 15px; }
@@ -137,5 +141,9 @@
     setInterval(updateCurrentTemps, 30000);
     setInterval(fetchHistory,       300000);
 </script>
+<div class="footer">FreezerPi v{{ version }}</div>
+
+<div class="footer">FreezerPi v{{ version }}</div>
+
 </body>
 </html>

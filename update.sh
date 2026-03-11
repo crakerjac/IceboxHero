@@ -78,6 +78,18 @@ current_phase() {
 
 validate_services() {
     local all_ok=true
+    header "Validating /data Persistence"
+    DATA_MOUNT=$(mount | grep " /data ")
+    if echo "${DATA_MOUNT}" | grep -q "ext4"; then
+        success "/data is a real ext4 partition (not overlaid)"
+    elif echo "${DATA_MOUNT}" | grep -q "overlay"; then
+        error "/data is still overlaid by overlayroot — changes will be lost on reboot"
+        error "Run the full update cycle: sudo ./update.sh prepare → apply → verify"
+        all_ok=false
+    else
+        warn "/data mount status unclear: ${DATA_MOUNT}"
+    fi
+
     header "Validating Services"
 
     for svc in "${SERVICES[@]}"; do
@@ -243,6 +255,11 @@ phase_apply() {
     # Run setup
     header "Running Setup"
     bash "${SCRIPT_DIR}/setup.sh"
+
+    # Explicitly sync VERSION to /opt — belt-and-suspenders in case setup.sh
+    # ever fails partway through after the deploy step
+    cp "${SCRIPT_DIR}/VERSION" /opt/freezerpi/VERSION
+    success "VERSION deployed: $(cat /opt/freezerpi/VERSION)"
 
     # Validate before re-enabling overlay
     header "Validating Install"
