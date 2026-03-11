@@ -53,7 +53,7 @@ echo ""
 # =============================================================================
 header "Checking for DS18B20 Sensors"
 
-SENSOR_COUNT=$(ls /sys/bus/w1/devices/28-* 2>/dev/null | wc -l)
+SENSOR_COUNT=$(ls /sys/bus/w1/devices/28-* 2>/dev/null | wc -l || true)
 if [[ "${SENSOR_COUNT}" -eq 0 ]]; then
     warn "No DS18B20 sensors detected at /sys/bus/w1/devices/28-*"
     warn "Starting services anyway, but sensor_service will report missing sensors."
