@@ -26,7 +26,7 @@
 #
 # What you must do manually (before running this script):
 #   - Create and mount the /data ext4 partition (see README Step 1)
-#   - Add /dev/mmcblk0p3 to /etc/fstab (see README Step 1)
+#   - Add /dev/mmcblk0p3 to /etc/fstab is NOT required — data.mount handles it
 #
 # What you must do manually (after running this script):
 #   - Edit /data/config/config.ini with your sensor ROM IDs and credentials
@@ -118,10 +118,11 @@ if ! mountpoint -q /data; then
     echo  "    sudo fdisk /dev/mmcblk0        # create p3"
     echo  "    sudo mkfs.ext4 /dev/mmcblk0p3"
     echo  "    sudo mkdir -p /data/config /data/db /data/logs"
-    echo  "    # Add to /etc/fstab:"
-    echo  "    # /dev/mmcblk0p3  /data  ext4  defaults,noatime  0  2"
-    echo  "    sudo mount -a"
+    echo  "    sudo mount /dev/mmcblk0p3 /data"
     echo  "    sudo chown -R ${REAL_USER}:${REAL_USER} /data"
+    echo  ""
+    echo  "  Do NOT add /data to /etc/fstab — setup.sh installs a systemd"
+    echo  "  data.mount unit that handles mounting and bypasses overlayroot."
     echo ""
     exit 1
 fi
@@ -253,6 +254,10 @@ if [[ -f "${SCRIPT_DIR}/static/favicon.png" ]]; then
     success "Deployed: static/favicon.png"
 fi
 
+install -m 644 -o "${REAL_USER}" -g "${REAL_USER}" \
+    "${SCRIPT_DIR}/VERSION" "/opt/freezerpi/VERSION"
+success "Deployed: VERSION"
+
 # =============================================================================
 # STEP 5 — /data directory structure
 # =============================================================================
@@ -374,6 +379,23 @@ success "tmpfiles.d configuration installed (/run/freezerpi and /run/freezer_db 
 # =============================================================================
 header "Installing systemd Services"
 
+# data.mount — makes /data a real persistent partition even with overlayroot enabled.
+# The overlayroot initramfs overlays every fstab entry it finds. The fix is to
+# remove /data from fstab entirely so initramfs never sees it, then let this
+# systemd unit mount it directly after handoff to systemd.
+install -m 644 "${SCRIPT_DIR}/systemd/data.mount" "/etc/systemd/system/data.mount"
+success "Installed: data.mount"
+
+# Remove /data from /etc/fstab if present — data.mount takes over from here
+if grep -q "mmcblk0p3\|[[:space:]]/data[[:space:]]" /etc/fstab; then
+    cp /etc/fstab /etc/fstab.pre-freezerpi.bak
+    sed -i '/[[:space:]]\/data[[:space:]]/d' /etc/fstab
+    sed -i '/mmcblk0p3/d' /etc/fstab
+    success "Removed /data entry from /etc/fstab (backup: /etc/fstab.pre-freezerpi.bak)"
+else
+    info "/data not in /etc/fstab — nothing to remove"
+fi
+
 SERVICES=(
     freezer-sensor.service
     freezer-display.service
@@ -394,6 +416,9 @@ for svc in "${SERVICES[@]}"; do
 done
 
 systemctl daemon-reload
+
+systemctl enable data.mount
+success "Enabled: data.mount"
 
 for svc in "${SERVICES[@]}"; do
     systemctl enable "${svc}"

@@ -53,13 +53,13 @@ echo ""
 # =============================================================================
 header "Checking for DS18B20 Sensors"
 
-SENSOR_COUNT=$(ls /sys/bus/w1/devices/28-* 2>/dev/null | wc -l)
+SENSOR_COUNT=$(ls /sys/bus/w1/devices/28-* 2>/dev/null | wc -l || true)
 if [[ "${SENSOR_COUNT}" -eq 0 ]]; then
     warn "No DS18B20 sensors detected at /sys/bus/w1/devices/28-*"
     warn "Starting services anyway, but sensor_service will report missing sensors."
     warn "The watchdog will reboot the Pi in 180 seconds if the IPC file is never written."
     echo ""
-    read -r -p "Continue anyway? [y/N] " confirm
+    read -r -p "Continue anyway? [y/N] " confirm || true
     if [[ ! "${confirm}" =~ ^[Yy]$ ]]; then
         echo "Aborted. Connect sensors and reboot, then re-run this script."
         exit 0
@@ -86,7 +86,7 @@ if grep -q "28-00000xxxxxxx" "${CONFIG_FILE}"; then
     warn "config.ini still contains placeholder sensor ROM IDs."
     warn "Edit ${CONFIG_FILE} before starting — services will not work correctly."
     echo ""
-    read -r -p "Continue anyway? [y/N] " confirm
+    read -r -p "Continue anyway? [y/N] " confirm || true
     if [[ ! "${confirm}" =~ ^[Yy]$ ]]; then
         echo "Aborted."
         exit 0
@@ -114,13 +114,20 @@ done
 # =============================================================================
 header "Starting Hardware Watchdog"
 
-# Give sensor_service a moment to write the initial IPC file before
-# the watchdog starts monitoring it.
-info "Waiting 5 seconds for sensor_service to initialize..."
-sleep 5
-
-systemctl start watchdog
-success "Watchdog started"
+WATCHDOG_STATE_FILE="/data/watchdog_was_active"
+if [[ -f "${WATCHDOG_STATE_FILE}" ]]; then
+    # Watchdog was active when stop_services.sh was last run — re-arm it
+    info "Watchdog was previously active. Waiting 5 seconds for sensor_service to initialize..."
+    sleep 5
+    systemctl start watchdog
+    rm -f "${WATCHDOG_STATE_FILE}"
+    success "Watchdog re-armed"
+else
+    # Watchdog was not running before — don't arm it automatically.
+    # Use start_services.sh --watchdog to arm it explicitly if needed.
+    info "Watchdog was not previously active — leaving it disabled"
+    info "To arm it manually: sudo systemctl start watchdog"
+fi
 
 # =============================================================================
 # Status summary

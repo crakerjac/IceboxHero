@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Freezer Monitor</title>
+    <title>Freezer Monitor  v{{ version }}</title>
     <link rel="icon" type="image/png" href="/static/favicon.png">
     <style>
         body            { font-family: Arial, sans-serif; background-color: #121212; color: #ffffff; padding: 20px; }
@@ -15,6 +15,11 @@
         .status-warning { color: #ffeb3b; }
         .status-critical{ color: #f44336; }
         .chart-container{ background-color: #1e1e1e; padding: 20px; border-radius: 8px; height: 400px; }
+        .footer         { margin-top: 30px; text-align: center; font-size: 0.75em; color: #555; }
+        .watchdog       { margin-left: 14px; }
+        .wd-active      { color: #4caf50; }
+        .wd-inactive    { color: #f44336; }
+        .wd-unknown     { color: #666; }
 
         @media (max-width: 768px) {
             body            { padding: 12px; }
@@ -36,6 +41,10 @@
     <canvas id="historyChart"></canvas>
 </div>
 
+<div class="footer">
+    <span id="watchdog-status" class="watchdog wd-unknown">&#9679; Watchdog: checking...</span>
+</div>
+
 <script>
     let historyChart = null;
 
@@ -52,26 +61,38 @@
 
                 if (data.error && Object.keys(data.sensors).length === 0) {
                     container.innerHTML = `<div class="card"><h3>Status</h3><div class="temp">${data.error}</div></div>`;
-                    return;
+                } else {
+                    Object.keys(data.sensors).sort().forEach(sensor => {
+                        const temp = data.sensors[sensor];
+                        let statusClass  = 'status-normal';
+                        let displayTemp  = temp === null ? '--.-' : temp.toFixed(1);
+
+                        if (temp === null || temp >= tempCritical) {
+                            statusClass = 'status-critical';
+                        } else if (temp >= tempWarning) {
+                            statusClass = 'status-warning';
+                        }
+
+                        container.innerHTML += `
+                            <div class="card">
+                                <h3>${sensor}</h3>
+                                <div class="temp ${statusClass}">${displayTemp}&deg;F</div>
+                            </div>`;
+                    });
                 }
 
-                Object.keys(data.sensors).sort().forEach(sensor => {
-                    const temp = data.sensors[sensor];
-                    let statusClass  = 'status-normal';
-                    let displayTemp  = temp === null ? '--.-' : temp.toFixed(1);
-
-                    if (temp === null || temp >= tempCritical) {
-                        statusClass = 'status-critical';
-                    } else if (temp >= tempWarning) {
-                        statusClass = 'status-warning';
-                    }
-
-                    container.innerHTML += `
-                        <div class="card">
-                            <h3>${sensor}</h3>
-                            <div class="temp ${statusClass}">${displayTemp}&deg;F</div>
-                        </div>`;
-                });
+                // Update watchdog indicator from same API response
+                const wd = document.getElementById('watchdog-status');
+                if (data.watchdog_active === true) {
+                    wd.className = 'watchdog wd-active';
+                    wd.innerHTML = '&#9679; Watchdog: active';
+                } else if (data.watchdog_active === false) {
+                    wd.className = 'watchdog wd-inactive';
+                    wd.innerHTML = '&#9679; Watchdog: DISABLED';
+                } else {
+                    wd.className = 'watchdog wd-unknown';
+                    wd.innerHTML = '&#9679; Watchdog: unknown';
+                }
             })
             .catch(err => console.error('Failed to fetch current temps:', err));
     }
@@ -137,5 +158,6 @@
     setInterval(updateCurrentTemps, 30000);
     setInterval(fetchHistory,       300000);
 </script>
+<div class="footer">FreezerPi v{{ version }}</div>
 </body>
 </html>

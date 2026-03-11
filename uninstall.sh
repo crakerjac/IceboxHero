@@ -56,7 +56,7 @@ echo    "         Back it up first if you want to keep your sensor ROM IDs"
 echo    "         and credentials:"
 echo    "           cp /data/config/config.ini /data/config/config.ini.save"
 echo ""
-read -r -p "Continue? [y/N] " confirm
+read -r -p "Continue? [y/N] " confirm || true
 if [[ ! "${confirm}" =~ ^[Yy]$ ]]; then
     echo "Aborted."
     exit 0
@@ -91,6 +91,21 @@ for svc in "${SERVICES[@]}"; do
         info "Not found (skipping): /etc/systemd/system/${svc}"
     fi
 done
+
+# data.mount — remove persistent /data overlay override
+systemctl disable data.mount 2>/dev/null || true
+rm -f /etc/systemd/system/data.mount
+success "Removed: data.mount"
+
+# Restore /etc/fstab if setup.sh made a backup
+if [[ -f /etc/fstab.pre-freezerpi.bak ]]; then
+    cp /etc/fstab.pre-freezerpi.bak /etc/fstab
+    rm -f /etc/fstab.pre-freezerpi.bak
+    success "Restored /etc/fstab from backup"
+    info "Note: /data will now require a manual mount or fstab entry to be accessible"
+else
+    warn "No /etc/fstab backup found — fstab was not modified or backup was already removed"
+fi
 
 systemctl daemon-reload
 success "systemd daemon reloaded"

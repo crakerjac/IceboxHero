@@ -21,10 +21,19 @@ from config_helper import load_config
 
 app = Flask(__name__)
 
-config       = load_config()
-IPC_FILE     = "/run/freezerpi/telemetry_state.json"
-DB_FILE      = "/run/freezer_db/freezer_monitor.db"   # Live RAM database
-WEB_PORT     = config.getint('network', 'web_port')
+VERSION_FILE = os.path.join(os.path.dirname(__file__), 'VERSION')
+
+def get_version():
+    try:
+        with open(VERSION_FILE) as f:
+            return f.read().strip()
+    except Exception:
+        return 'unknown'
+
+config        = load_config()
+IPC_FILE      = "/run/freezerpi/telemetry_state.json"
+DB_FILE       = "/run/freezer_db/freezer_monitor.db"   # Live RAM database
+WEB_PORT      = config.getint('network', 'web_port')
 TEMP_WARNING  = config.getfloat('sampling', 'temp_warning')
 TEMP_CRITICAL = config.getfloat('sampling', 'temp_critical')
 
@@ -79,16 +88,31 @@ def get_24h_history():
         return []
 
 
+def get_watchdog_status():
+    """Returns watchdog active state by checking systemd."""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['systemctl', 'is-active', 'watchdog'],
+            capture_output=True, text=True, timeout=2
+        )
+        return result.stdout.strip() == 'active'
+    except Exception:
+        return None  # Unknown
+
+
 @app.route('/')
 def index():
     """Serves the main dashboard, injecting threshold values from config."""
-    return render_template('index.html', warning=TEMP_WARNING, critical=TEMP_CRITICAL)
+    return render_template('index.html', warning=TEMP_WARNING, critical=TEMP_CRITICAL, version=get_version())
 
 
 @app.route('/api/current')
 def api_current():
     """Returns current sensor readings from the RAM IPC file."""
-    return jsonify(get_current_state())
+    state = get_current_state()
+    state['watchdog_active'] = get_watchdog_status()
+    return jsonify(state)
 
 
 @app.route('/api/history')
