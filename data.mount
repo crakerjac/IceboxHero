@@ -1,0 +1,30 @@
+# =============================================================================
+# data.mount — Mount /data as a real persistent ext4 partition
+#
+# The Raspberry Pi overlayroot initramfs overlays ALL fstab entries including
+# /data, which would cause all writes to /data (config, DB, logs) to go to
+# tmpfs and be lost on reboot.
+#
+# This unit mounts the real mmcblk0p3 device directly over the overlay mount,
+# making /data genuinely persistent through reboots with the overlay enabled.
+#
+# Installed by setup.sh to /etc/systemd/system/data.mount
+# Unit filename MUST match the mount point (data.mount → /data)
+# =============================================================================
+
+[Unit]
+Description=Persistent /data storage (override overlayroot)
+Documentation=https://github.com/crakerjac/freezerPi
+DefaultDependencies=no
+Conflicts=umount.target
+After=local-fs-pre.target
+Before=local-fs.target umount.target
+
+[Mount]
+What=/dev/mmcblk0p3
+Where=/data
+Type=ext4
+Options=defaults,noatime
+
+[Install]
+WantedBy=local-fs.target

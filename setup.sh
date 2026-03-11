@@ -253,6 +253,10 @@ if [[ -f "${SCRIPT_DIR}/static/favicon.png" ]]; then
     success "Deployed: static/favicon.png"
 fi
 
+install -m 644 -o "${REAL_USER}" -g "${REAL_USER}" \
+    "${SCRIPT_DIR}/VERSION" "/opt/freezerpi/VERSION"
+success "Deployed: VERSION"
+
 # =============================================================================
 # STEP 5 — /data directory structure
 # =============================================================================
@@ -374,6 +378,12 @@ success "tmpfiles.d configuration installed (/run/freezerpi and /run/freezer_db 
 # =============================================================================
 header "Installing systemd Services"
 
+# data.mount — makes /data a real persistent partition even with overlayroot enabled.
+# The overlayroot initramfs overlays /data by default; this unit mounts the real
+# device over the overlay mount so config, DB, and logs survive reboots.
+install -m 644 "${SCRIPT_DIR}/systemd/data.mount" "/etc/systemd/system/data.mount"
+success "Installed: data.mount"
+
 SERVICES=(
     freezer-sensor.service
     freezer-display.service
@@ -394,6 +404,9 @@ for svc in "${SERVICES[@]}"; do
 done
 
 systemctl daemon-reload
+
+systemctl enable data.mount
+success "Enabled: data.mount"
 
 for svc in "${SERVICES[@]}"; do
     systemctl enable "${svc}"

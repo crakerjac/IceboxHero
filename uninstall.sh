@@ -92,6 +92,11 @@ for svc in "${SERVICES[@]}"; do
     fi
 done
 
+# data.mount — remove persistent /data overlay override
+systemctl disable data.mount 2>/dev/null || true
+rm -f /etc/systemd/system/data.mount
+success "Removed: data.mount"
+
 systemctl daemon-reload
 success "systemd daemon reloaded"
 
