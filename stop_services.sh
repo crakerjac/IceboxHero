@@ -57,11 +57,14 @@ echo ""
 # =============================================================================
 header "Stopping Hardware Watchdog"
 
+WATCHDOG_STATE_FILE="/data/watchdog_was_active"
 if systemctl is-active --quiet watchdog 2>/dev/null; then
     systemctl stop watchdog
-    success "Watchdog stopped"
+    touch "${WATCHDOG_STATE_FILE}"
+    success "Watchdog stopped (state saved — start_services.sh will re-arm it)"
 else
-    info "Watchdog was not running"
+    rm -f "${WATCHDOG_STATE_FILE}"
+    info "Watchdog was not running (state cleared)"
 fi
 
 # =============================================================================

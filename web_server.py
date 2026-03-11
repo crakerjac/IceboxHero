@@ -88,6 +88,19 @@ def get_24h_history():
         return []
 
 
+def get_watchdog_status():
+    """Returns watchdog active state by checking systemd."""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['systemctl', 'is-active', 'watchdog'],
+            capture_output=True, text=True, timeout=2
+        )
+        return result.stdout.strip() == 'active'
+    except Exception:
+        return None  # Unknown
+
+
 @app.route('/')
 def index():
     """Serves the main dashboard, injecting threshold values from config."""
@@ -97,7 +110,9 @@ def index():
 @app.route('/api/current')
 def api_current():
     """Returns current sensor readings from the RAM IPC file."""
-    return jsonify(get_current_state())
+    state = get_current_state()
+    state['watchdog_active'] = get_watchdog_status()
+    return jsonify(state)
 
 
 @app.route('/api/history')

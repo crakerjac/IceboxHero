@@ -114,13 +114,20 @@ done
 # =============================================================================
 header "Starting Hardware Watchdog"
 
-# Give sensor_service a moment to write the initial IPC file before
-# the watchdog starts monitoring it.
-info "Waiting 5 seconds for sensor_service to initialize..."
-sleep 5
-
-systemctl start watchdog
-success "Watchdog started"
+WATCHDOG_STATE_FILE="/data/watchdog_was_active"
+if [[ -f "${WATCHDOG_STATE_FILE}" ]]; then
+    # Watchdog was active when stop_services.sh was last run — re-arm it
+    info "Watchdog was previously active. Waiting 5 seconds for sensor_service to initialize..."
+    sleep 5
+    systemctl start watchdog
+    rm -f "${WATCHDOG_STATE_FILE}"
+    success "Watchdog re-armed"
+else
+    # Watchdog was not running before — don't arm it automatically.
+    # Use start_services.sh --watchdog to arm it explicitly if needed.
+    info "Watchdog was not previously active — leaving it disabled"
+    info "To arm it manually: sudo systemctl start watchdog"
+fi
 
 # =============================================================================
 # Status summary
