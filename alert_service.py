@@ -95,6 +95,7 @@ email_queue             = []
 queue_lock              = threading.Lock()
 last_email_sent_times   = {}  # {"sensor_ALERTTYPE": monotonic_timestamp}
 critical_read_counts    = {}  # {"sensor_name": consecutive_critical_count}
+sensor_failed_state     = {}  # {"sensor_name": bool} — True while sensor is reporting None
 last_freeze_email       = 0
 
 
@@ -305,9 +306,15 @@ def main():
                         if temp is None:
                             trigger_buzzer = True
                             if is_new_read:
+                                sensor_failed_state[name] = True
                                 queue_email("FAILURE", name, "MISSING/READ ERROR")
                                 critical_read_counts[name] = 0
                         else:
+                            # Sensor recovered from a previous FAILURE state
+                            if is_new_read and sensor_failed_state.get(name, False):
+                                sensor_failed_state[name] = False
+                                queue_email("RECOVERED", name, temp, status_email=True)
+
                             if temp >= temp_critical:
                                 if is_new_read:
                                     critical_read_counts[name] = critical_read_counts.get(name, 0) + 1
