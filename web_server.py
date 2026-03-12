@@ -150,6 +150,15 @@ def get_system_status():
     except OSError:
         status['uptime'] = None
 
+    # Pi CPU temperature
+    try:
+        result = subprocess.run(['vcgencmd', 'measure_temp'], capture_output=True, text=True, timeout=2)
+        # Output format: temp=42.8'C
+        temp_str = result.stdout.strip().replace("temp=", "").replace("'C", "")
+        status['cpu_temp_c'] = float(temp_str)
+    except Exception:
+        status['cpu_temp_c'] = None
+
     return status
 
 

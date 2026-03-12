@@ -64,6 +64,7 @@
             <div class="stat"><div class="stat-label">Last SD Backup</div><div class="stat-value" id="st-backup">—</div></div>
             <div class="stat"><div class="stat-label">/data Used</div><div class="stat-value" id="st-disk">—</div></div>
             <div class="stat"><div class="stat-label">Uptime</div><div class="stat-value" id="st-uptime">—</div></div>
+            <div class="stat"><div class="stat-label">Pi CPU Temp</div><div class="stat-value" id="st-cputemp">—</div></div>
         </div>
     </div>
 </div>
@@ -228,6 +229,17 @@
 
                 // Uptime
                 document.getElementById('st-uptime').textContent = data.uptime || 'N/A';
+
+                // CPU temperature
+                const cpuEl = document.getElementById('st-cputemp');
+                if (data.cpu_temp_c !== null && data.cpu_temp_c !== undefined) {
+                    cpuEl.textContent = data.cpu_temp_c.toFixed(1) + '°C';
+                    cpuEl.className = data.cpu_temp_c >= 80 ? 'stat-value stat-crit' :
+                                      data.cpu_temp_c >= 70 ? 'stat-value stat-warn' : 'stat-value';
+                } else {
+                    cpuEl.textContent = 'N/A';
+                    cpuEl.className = 'stat-value';
+                }
             })
             .catch(err => console.error('Failed to fetch status:', err));
     }
