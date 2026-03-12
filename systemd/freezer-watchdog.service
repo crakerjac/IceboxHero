@@ -1,0 +1,30 @@
+[Unit]
+Description=Freezer Monitor — Hardware Watchdog Supervisor
+Documentation=https://github.com/crakerjac/freezerPi
+# Start after sensor service is up — watchdog monitors the IPC file it writes
+After=freezer-sensor.service
+Requires=freezer-sensor.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+
+# Wait up to 30 seconds for the IPC file to appear before arming the watchdog.
+# This prevents a race where the watchdog starts before sensor_service has
+# written its first reading and immediately triggers a reboot.
+ExecStartPre=/bin/bash -c '\
+    for i in $(seq 1 30); do \
+        [ -f /run/freezerpi/telemetry_state.json ] && exit 0; \
+        sleep 1; \
+    done; \
+    echo "Timed out waiting for IPC file — watchdog NOT armed"; \
+    exit 1'
+
+ExecStart=/bin/systemctl start watchdog.service
+ExecStop=/bin/systemctl stop watchdog.service
+
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

@@ -45,7 +45,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_FILE="/data/update_state"
-SERVICES=(freezer-sensor freezer-display freezer-alert freezer-db freezer-web)
+SERVICES=(freezer-sensor freezer-display freezer-alert freezer-db freezer-web freezer-watchdog)
 
 # =============================================================================
 # Helpers
@@ -181,8 +181,8 @@ phase_prepare() {
 
     # Back up config before any changes
     if [[ -f /data/config/config.ini ]]; then
-        cp /data/config/config.ini /data/config/config.ini.save
-        success "Config backed up to /data/config/config.ini.save"
+        cp /data/config/config.ini /data/config/config.ini.pre-update.save
+        success "Config backed up to /data/config/config.ini.pre-update.save"
     fi
 
     write_state "apply_pending"

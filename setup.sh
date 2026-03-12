@@ -229,7 +229,7 @@ install -d -m 755 -o "${REAL_USER}" -g "${REAL_USER}" \
 
 # Python modules
 for f in config_helper.py sensor_service.py display_service.py \
-          alert_service.py db_logger.py db_maintenance.py web_server.py mock_sensors.py; do
+          alert_service.py db_logger.py db_maintenance.py web_server.py mock_sensors.py display_test.py; do
     if [[ -f "${SCRIPT_DIR}/${f}" ]]; then
         install -m 644 -o "${REAL_USER}" -g "${REAL_USER}" \
             "${SCRIPT_DIR}/${f}" "/opt/freezerpi/${f}"
@@ -335,6 +335,21 @@ systemctl disable watchdog 2>/dev/null || true
 systemctl stop watchdog 2>/dev/null || true
 success "Watchdog configured (disabled — armed by start_services.sh)"
 
+# Disable systemd's built-in hardware watchdog. By default systemd claims
+# /dev/watchdog0 for itself (RuntimeWatchdogSec=1min) which prevents the
+# userspace watchdog daemon from opening /dev/watchdog. Systemd's watchdog
+# only checks that systemd is alive — it won't detect a frozen sensor_service.
+# Our daemon monitors the IPC file, which is the correct check for FreezerPi.
+SYSTEMD_WD_CONF="/etc/systemd/system.conf.d/disable-runtime-watchdog.conf"
+mkdir -p /etc/systemd/system.conf.d/
+cat > "${SYSTEMD_WD_CONF}" <<'EOF'
+[Manager]
+RuntimeWatchdogSec=0
+ShutdownWatchdogSec=0
+EOF
+success "Systemd RuntimeWatchdog disabled (${SYSTEMD_WD_CONF})"
+info "Reboot required for this to take effect"
+
 # =============================================================================
 # STEP 9 — logrotate
 # =============================================================================
@@ -402,6 +417,7 @@ SERVICES=(
     freezer-alert.service
     freezer-db.service
     freezer-web.service
+    freezer-watchdog.service
 )
 
 for svc in "${SERVICES[@]}"; do
