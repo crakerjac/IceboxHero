@@ -329,11 +329,21 @@ EOF
 
 # Do NOT enable or start the watchdog here. The watchdog monitors the IPC
 # file for updates — if sensors are not connected yet, it will trigger a
-# reboot loop. start_services.sh arms the watchdog only after confirming
-# sensors are present and services are up.
+# reboot loop. freezer-watchdog.service arms the watchdog only after
+# confirming the IPC file exists.
 systemctl disable watchdog 2>/dev/null || true
 systemctl stop watchdog 2>/dev/null || true
-success "Watchdog configured (disabled — armed by start_services.sh)"
+
+# The Debian watchdog package gates startup on run_watchdog=1 in
+# /etc/default/watchdog. Without this the service exits silently at boot
+# and systemctl start watchdog hangs waiting for a PID that never arrives.
+if [[ -f /etc/default/watchdog ]]; then
+    sed -i 's/^run_watchdog=.*/run_watchdog=1/' /etc/default/watchdog
+    grep -q '^run_watchdog=' /etc/default/watchdog || echo 'run_watchdog=1' >> /etc/default/watchdog
+else
+    echo 'run_watchdog=1' > /etc/default/watchdog
+fi
+success "Watchdog configured (disabled — armed by freezer-watchdog.service)"
 
 # Disable systemd's built-in hardware watchdog. By default systemd claims
 # /dev/watchdog0 for itself (RuntimeWatchdogSec=1min) which prevents the
@@ -474,7 +484,7 @@ echo  "  ✓ System packages installed"
 echo  "  ✓ Python dependencies installed"
 echo  "  ✓ Source code deployed to /opt/freezerpi/"
 echo  "  ✓ /data directory structure created"
-echo  "  ✓ Watchdog daemon configured (disabled — armed by start_services.sh)"
+echo  "  ✓ Watchdog daemon configured (auto-armed at boot by freezer-watchdog.service)"
 echo  "  ✓ tmpfiles.d configured (/run/freezerpi and /run/freezer_db created, pi-owned)"
 echo  "  ✓ logrotate configured"
 echo  "  ✓ Five systemd services installed and enabled"

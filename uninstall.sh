@@ -73,6 +73,7 @@ SERVICES=(
     freezer-alert.service
     freezer-db.service
     freezer-web.service
+    freezer-watchdog.service
 )
 
 for svc in "${SERVICES[@]}"; do
@@ -225,14 +226,19 @@ if [[ -f /etc/watchdog.conf.bak ]]; then
     mv /etc/watchdog.conf.bak /etc/watchdog.conf
     success "Restored /etc/watchdog.conf from backup"
 else
-    # No backup means watchdog.conf didn't exist before setup.sh ran.
-    # Write a safe inert config rather than deleting the file entirely,
-    # since the watchdog package expects the file to exist.
     cat > /etc/watchdog.conf <<'EOF'
 # watchdog.conf — restored to default state by freezerpi uninstall.sh
 # No devices or files are being monitored.
 EOF
     info "No backup found — reset /etc/watchdog.conf to inert default"
+fi
+
+# Remove systemd RuntimeWatchdog override — restores systemd's default behavior
+SYSTEMD_WD_CONF="/etc/systemd/system.conf.d/disable-runtime-watchdog.conf"
+if [[ -f "${SYSTEMD_WD_CONF}" ]]; then
+    rm "${SYSTEMD_WD_CONF}"
+    success "Removed ${SYSTEMD_WD_CONF} (systemd RuntimeWatchdog restored to default)"
+    info "Reboot required for this to take effect"
 fi
 
 # =============================================================================
