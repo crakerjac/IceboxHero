@@ -1,20 +1,18 @@
 #!/usr/bin/env bash
 # =============================================================================
 # FreezerPi — Stop Services
-# Stops the hardware watchdog first, then all FreezerPi services.
 #
 # Usage:
 #   sudo ./stop_services.sh
 #
-# The watchdog is always stopped first. Stopping any FreezerPi service
-# before stopping the watchdog risks the 180-second timeout triggering
-# a hardware reboot before you finish your work.
+# Stops freezer-watchdog first so the hardware watchdog is disarmed before
+# FreezerPi services stop writing the IPC file. Then stops all services.
+# On next boot, freezer-watchdog.service re-arms automatically.
 #
 # Use this script before:
-#   - Working on the system without sensors connected
 #   - Editing and redeploying source files
 #   - Running uninstall.sh
-#   - Any maintenance that would interrupt the IPC file updates
+#   - Any maintenance that would interrupt IPC file updates
 #
 # License: GNU General Public License v3.0
 # =============================================================================
@@ -39,6 +37,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 SERVICES=(
+    freezer-watchdog.service
     freezer-sensor.service
     freezer-display.service
     freezer-alert.service
@@ -51,24 +50,7 @@ echo -e "${BOLD}FreezerPi — Stopping Services${RST}"
 echo ""
 
 # =============================================================================
-# Stop watchdog FIRST — before anything else
-# Prevents the 180-second IPC timeout from triggering a hardware reboot
-# while the FreezerPi services are being stopped.
-# =============================================================================
-header "Stopping Hardware Watchdog"
-
-WATCHDOG_STATE_FILE="/data/watchdog_was_active"
-if systemctl is-active --quiet watchdog 2>/dev/null; then
-    systemctl stop watchdog
-    touch "${WATCHDOG_STATE_FILE}"
-    success "Watchdog stopped (state saved — start_services.sh will re-arm it)"
-else
-    rm -f "${WATCHDOG_STATE_FILE}"
-    info "Watchdog was not running (state cleared)"
-fi
-
-# =============================================================================
-# Stop FreezerPi services
+# Stop all services (watchdog first in the SERVICES array above)
 # =============================================================================
 header "Stopping FreezerPi Services"
 
@@ -90,9 +72,9 @@ echo -e "${BOLD}${YEL}  All services stopped.${RST}"
 echo -e "${BOLD}${YEL}============================================================${RST}"
 echo ""
 
-for svc in "${SERVICES[@]}" watchdog.service; do
+for svc in "${SERVICES[@]}"; do
     STATUS=$(systemctl is-active "${svc}" 2>/dev/null || echo "inactive")
-    if [[ "${STATUS}" == "inactive" || "${STATUS}" == "dead" ]]; then
+    if [[ "${STATUS}" == "inactive" || "${STATUS}" == "dead" || "${STATUS}" == "unknown" ]]; then
         echo -e "  ${GRN}●${RST} ${svc} (stopped)"
     else
         echo -e "  ${YEL}●${RST} ${svc} (${STATUS})"

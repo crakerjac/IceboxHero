@@ -1,21 +1,18 @@
 [Unit]
-Description=Freezer Monitor — Web Dashboard Service
-After=network.target
-RequiresMountsFor=/data
+Description=Freezer Monitor — Hardware Watchdog Supervisor
+Documentation=https://github.com/crakerjac/freezerPi
+After=freezer-sensor.service
+Requires=freezer-sensor.service
 
 [Service]
 Type=simple
-User=pi
-ExecStart=/usr/bin/python3 -u /opt/freezerpi/web_server.py
-StandardOutput=journal
-StandardError=journal
-Restart=always
-RestartSec=5
-ReadWritePaths=/run /data
-NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=strict
-ProtectHome=yes
+User=root
+# tmpfiles.d creates /run/freezerpi/telemetry_state.json at every boot before
+# services start, so the watchdog always has a file to monitor. sensor_service
+# overwrites it with real data within its first poll cycle. If sensor_service
+# ever stops updating the file for 180s, the watchdog triggers a reboot.
+ExecStart=/usr/sbin/watchdog -F
+Restart=no
 
 [Install]
 WantedBy=multi-user.target

@@ -388,11 +388,17 @@ header "Installing tmpfiles.d Configuration"
 # owned by pi, so no service needs to run as root.
 cat > /etc/tmpfiles.d/freezerpi.conf <<'EOF'
 # /etc/tmpfiles.d/freezerpi.conf
-# Creates runtime directories in /run owned by the pi user at every boot.
+# Creates runtime directories and IPC file in /run owned by pi at every boot.
 # /run/freezerpi  — IPC state file, corruption flag
 # /run/freezer_db — live SQLite RAM database
+#
+# The IPC file is pre-created so the watchdog daemon has a file to monitor
+# from the moment it starts. sensor_service overwrites it with real data
+# within its first poll cycle. Without this, the watchdog would see a
+# missing file at boot and trigger an immediate reboot.
 d /run/freezerpi   0755 pi pi -
 d /run/freezer_db  0755 pi pi -
+f /run/freezerpi/telemetry_state.json 0644 pi pi - {"sensors":{},"timestamp":0,"boot":true}
 EOF
 
 # Apply immediately so services can start without a reboot
