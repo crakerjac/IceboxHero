@@ -53,7 +53,7 @@ echo ""
 # =============================================================================
 header "Checking for DS18B20 Sensors"
 
-SENSOR_COUNT=$(ls /sys/bus/w1/devices/28-* 2>/dev/null | wc -l || true)
+SENSOR_COUNT=$(ls -d /sys/bus/w1/devices/28-*/ 2>/dev/null | wc -l || true)
 if [[ "${SENSOR_COUNT}" -eq 0 ]]; then
     warn "No DS18B20 sensors detected at /sys/bus/w1/devices/28-*"
     warn "Starting services anyway, but sensor_service will report missing sensors."
@@ -66,7 +66,7 @@ if [[ "${SENSOR_COUNT}" -eq 0 ]]; then
     fi
 else
     success "Found ${SENSOR_COUNT} sensor(s) on the 1-Wire bus"
-    ls /sys/bus/w1/devices/28-* 2>/dev/null | while read -r s; do
+    ls -d /sys/bus/w1/devices/28-*/ 2>/dev/null | while read -r s; do
         info "  $(basename "${s}")"
     done
 fi
@@ -139,7 +139,9 @@ echo -e "${BOLD}${GRN}==========================================================
 echo ""
 
 for svc in "${SERVICES[@]}" watchdog.service; do
-    STATUS=$(systemctl is-active "${svc}" 2>/dev/null || echo "unknown")
+    STATUS=$(systemctl is-active "${svc}" 2>/dev/null || true)
+    # Normalize — 'unknown' means never started this boot, treat same as inactive
+    [[ "${STATUS}" == "unknown" || -z "${STATUS}" ]] && STATUS="inactive"
     if [[ "${STATUS}" == "active" ]]; then
         echo -e "  ${GRN}●${RST} ${svc}"
     else
