@@ -13,7 +13,7 @@
 
 [Unit]
 Description=Persistent /data storage (bypass overlayroot)
-Documentation=https://github.com/crakerjac/freezerPi
+Documentation=https://github.com/crakerjac/IceboxHero
 DefaultDependencies=no
 Conflicts=umount.target
 After=local-fs-pre.target
