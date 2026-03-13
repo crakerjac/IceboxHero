@@ -232,10 +232,10 @@
 
                 // CPU temperature
                 const cpuEl = document.getElementById('st-cputemp');
-                if (data.cpu_temp_c !== null && data.cpu_temp_c !== undefined) {
-                    cpuEl.textContent = data.cpu_temp_c.toFixed(1) + '°C';
-                    cpuEl.className = data.cpu_temp_c >= 80 ? 'stat-value stat-crit' :
-                                      data.cpu_temp_c >= 70 ? 'stat-value stat-warn' : 'stat-value';
+                if (data.cpu_temp_f !== null && data.cpu_temp_f !== undefined) {
+                    cpuEl.textContent = data.cpu_temp_f.toFixed(1) + '°F';
+                    cpuEl.className = data.cpu_temp_f >= 176 ? 'stat-value stat-crit' :
+                                      data.cpu_temp_f >= 158 ? 'stat-value stat-warn' : 'stat-value';
                 } else {
                     cpuEl.textContent = 'N/A';
                     cpuEl.className = 'stat-value';
