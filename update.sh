@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
-# FreezerPi — Update Script
+# IceboxHero — Update Script
 #
-# Safely updates FreezerPi with the overlay filesystem enabled or disabled.
+# Safely updates IceboxHero with the overlay filesystem enabled or disabled.
 # Because the overlay makes root read-only, updates require two reboots:
 #
 #   Phase 1 — Prepare:  disable overlay, save state, reboot
@@ -45,7 +45,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_FILE="/data/update_state"
-SERVICES=(freezer-sensor freezer-display freezer-alert freezer-db freezer-web freezer-watchdog)
+SERVICES=(icebox-sensor icebox-display icebox-alert icebox-db icebox-web icebox-watchdog)
 
 # =============================================================================
 # Helpers
@@ -102,8 +102,8 @@ validate_services() {
     done
 
     header "Validating IPC File"
-    if [[ -f /run/freezerpi/telemetry_state.json ]]; then
-        AGE=$(( $(date +%s) - $(stat -c %Y /run/freezerpi/telemetry_state.json) ))
+    if [[ -f /run/iceboxhero/telemetry_state.json ]]; then
+        AGE=$(( $(date +%s) - $(stat -c %Y /run/iceboxhero/telemetry_state.json) ))
         if [[ ${AGE} -lt 600 ]]; then
             success "telemetry_state.json exists (${AGE}s old)"
         else
@@ -136,7 +136,7 @@ validate_services() {
     fi
 
     header "Installed Version"
-    VERSION=$(cat /opt/freezerpi/VERSION 2>/dev/null || echo "unknown")
+    VERSION=$(cat /opt/iceboxhero/VERSION 2>/dev/null || echo "unknown")
     success "Version: ${VERSION}"
 
     if [[ "${all_ok}" == "true" ]]; then
@@ -217,7 +217,7 @@ phase_apply() {
 
     echo ""
     info "This will:"
-    echo "  1. Stop all FreezerPi services and watchdog"
+    echo "  1. Stop all IceboxHero services and watchdog"
     echo "  2. Pull latest changes from GitHub"
     echo "  3. Run setup.sh"
     echo "  4. Validate the install"
@@ -257,8 +257,8 @@ phase_apply() {
 
     # Explicitly sync VERSION to /opt — belt-and-suspenders in case setup.sh
     # ever fails partway through after the deploy step
-    cp "${SCRIPT_DIR}/VERSION" /opt/freezerpi/VERSION
-    success "VERSION deployed: $(cat /opt/freezerpi/VERSION)"
+    cp "${SCRIPT_DIR}/VERSION" /opt/iceboxhero/VERSION
+    success "VERSION deployed: $(cat /opt/iceboxhero/VERSION)"
 
     # Validate before re-enabling overlay
     header "Validating Install"
@@ -311,7 +311,7 @@ phase_verify() {
     fi
 
     if validate_services; then
-        VERSION=$(cat /opt/freezerpi/VERSION 2>/dev/null || echo "unknown")
+        VERSION=$(cat /opt/iceboxhero/VERSION 2>/dev/null || echo "unknown")
         echo ""
         echo -e "${BOLD}${GRN}============================================================${RST}"
         echo -e "${BOLD}${GRN}  Update complete. Version ${VERSION} is running.${RST}"
@@ -320,7 +320,7 @@ phase_verify() {
         success "Update state cleared"
     else
         error "Validation failed after reboot."
-        error "Check service logs: journalctl -u freezer-alert.service -f"
+        error "Check service logs: journalctl -u icebox-alert.service -f"
         exit 1
     fi
 }
@@ -331,7 +331,7 @@ phase_verify() {
 
 phase_status() {
     echo ""
-    echo -e "${BOLD}FreezerPi Update Status${RST}"
+    echo -e "${BOLD}IceboxHero Update Status${RST}"
     echo ""
 
     echo -e "${BOLD}Overlay filesystem:${RST}"
@@ -343,7 +343,7 @@ phase_status() {
 
     echo ""
     echo -e "${BOLD}Installed version:${RST}"
-    echo "  $(cat /opt/freezerpi/VERSION 2>/dev/null || echo 'unknown')"
+    echo "  $(cat /opt/iceboxhero/VERSION 2>/dev/null || echo 'unknown')"
 
     echo ""
     echo -e "${BOLD}Repo version:${RST}"

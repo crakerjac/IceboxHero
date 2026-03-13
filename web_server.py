@@ -3,7 +3,7 @@ Module 6 — Web Server & Dashboard (web_server.py)
 
 Serves a local Flask dashboard on port 8080 (configurable).
 Two data sources:
-  - /api/current  → reads /run/freezerpi/telemetry_state.json (RAM, updates every 60 s)
+  - /api/current  → reads /run/iceboxhero/telemetry_state.json (RAM, updates every 60 s)
   - /api/history  → queries the RAM SQLite database for the last 24 hours
 
 The dashboard JS polls /api/current every 30 seconds and /api/history every
@@ -31,8 +31,8 @@ def get_version():
         return 'unknown'
 
 config        = load_config()
-IPC_FILE      = "/run/freezerpi/telemetry_state.json"
-DB_FILE       = "/run/freezer_db/freezer_monitor.db"   # Live RAM database
+IPC_FILE      = "/run/iceboxhero/telemetry_state.json"
+DB_FILE       = "/run/icebox_db/freezer_monitor.db"   # Live RAM database
 WEB_PORT      = config.getint('network', 'web_port')
 TEMP_WARNING  = config.getfloat('sampling', 'temp_warning')
 TEMP_CRITICAL = config.getfloat('sampling', 'temp_critical')
@@ -89,11 +89,11 @@ def get_24h_history():
 
 
 def get_watchdog_status():
-    """Returns watchdog active state by checking freezer-watchdog.service."""
+    """Returns watchdog active state by checking icebox-watchdog.service."""
     try:
         import subprocess
         result = subprocess.run(
-            ['systemctl', 'is-active', 'freezer-watchdog'],
+            ['systemctl', 'is-active', 'icebox-watchdog'],
             capture_output=True, text=True, timeout=2
         )
         return result.stdout.strip() == 'active'

@@ -1,4 +1,4 @@
-# FreezerPi — Raspberry Pi Freezer Monitor
+# IceboxHero — Raspberry Pi IceboxHero
 
 A self-contained, fault-tolerant freezer temperature monitoring system built on a Raspberry Pi Zero 2 W. All acquisition, storage, alerting, web hosting, and watchdog functions run locally with no external backend dependency. Designed for unattended, always-on operation with aggressive SD card wear minimization and hardware-enforced auto-recovery.
 
@@ -70,7 +70,7 @@ DS18B20 Sensors
                └───────────────────┘    └──────────────────┘    └───────────────────┘
                       │                        │                         │
                ST7735S LCD              Buzzer / Email            RAM SQLite DB
-                                                                  /run/freezer_db/
+                                                                  /run/icebox_db/
                                                                          │
                                                                   4-hr SD backup
                                                                   /data/db/
@@ -99,7 +99,7 @@ Three storage areas with distinct access patterns:
 
 | Path | Type | Purpose |
 |---|---|---|
-| `/opt/freezerpi/` | Read-Only (overlay) | All Python source code |
+| `/opt/iceboxhero/` | Read-Only (overlay) | All Python source code |
 | `/run/` | RAM (tmpfs) | IPC state file; live SQLite database |
 | `/data/` | Read-Write (ext4) | SD backup of SQLite; config; maintenance logs |
 
@@ -108,7 +108,7 @@ Three storage areas with distinct access patterns:
 - Weekly CRON maintenance log
 - Zero writes from the OS root partition
 
-The live database resides entirely in RAM (`/run/freezer_db/freezer_monitor.db`). On each boot it is restored from the last SD card backup. On a sudden power loss, up to 4 hours of temperature history may be lost — this is intentional. The SD card's longevity is the design priority.
+The live database resides entirely in RAM (`/run/icebox_db/freezer_monitor.db`). On each boot it is restored from the last SD card backup. On a sudden power loss, up to 4 hours of temperature history may be lost — this is intentional. The SD card's longevity is the design priority.
 
 ---
 
@@ -133,7 +133,7 @@ Emails arrive with one of two subject prefixes to support inbox filtering:
 - **`[ALERT]`** — Requires immediate attention. Covers: CRITICAL, WARNING, FAILURE, SYSTEM_FREEZE, SYSTEM_ERROR.
 - **`[STATUS]`** — Informational only. Covers: SYSTEM_BOOT.
 
-**Recommended Gmail filter:** Subject contains `[STATUS] Freezer Monitor` → Skip Inbox, Mark as read, Apply label.
+**Recommended Gmail filter:** Subject contains `[STATUS] IceboxHero` → Skip Inbox, Mark as read, Apply label.
 
 The email thread runs independently of the buzzer. If the network is down at alert time, the email is queued in memory and retried every 5 minutes until it succeeds.
 
@@ -217,8 +217,8 @@ Verify: `mountpoint /data` should print `/data is a mountpoint`.
 ### Step 2 — Clone and run setup
 
 ```bash
-git clone git@github.com:crakerjac/freezerPi.git
-cd freezerPi
+git clone git@github.com:crakerjac/IceboxHero.git
+cd IceboxHero
 sudo ./setup.sh
 ```
 
@@ -226,7 +226,7 @@ sudo ./setup.sh
 
 - Hardware interfaces (`/boot/firmware/config.txt` — watchdog, SPI, 1-Wire)
 - System packages and Python dependencies
-- Source code deployment to `/opt/freezerpi/`
+- Source code deployment to `/opt/iceboxhero/`
 - Chart.js download for the local dashboard
 - Watchdog daemon configuration
 - logrotate configuration
@@ -295,7 +295,7 @@ Once services are running, the dashboard is accessible from any browser on your 
 The easiest way is by hostname — Raspberry Pi OS advertises itself via mDNS by default:
 
 ```
-http://freezerpi.local:8080
+http://iceboxhero.local:8080
 ```
 
 If that doesn't resolve (some Windows networks block mDNS), find the IP address directly on the Pi:
@@ -316,7 +316,7 @@ The port is configurable in `config.ini` under `[network] → web_port`.
 ### Notes
 
 - The dashboard is **read-only** — there are no controls, only monitoring.
-- Chart.js is served locally from `/opt/freezerpi/static/chart.min.js` — the dashboard loads instantly and works fully during an internet outage.
+- Chart.js is served locally from `/opt/iceboxhero/static/chart.min.js` — the dashboard loads instantly and works fully during an internet outage.
 - Timestamps on the graph are stored in UTC in SQLite and converted to your browser's local timezone automatically for display.
 - The dashboard is served on all network interfaces (`0.0.0.0`). It is intended for use on a trusted private network only — there is no authentication.
 
@@ -326,7 +326,7 @@ The port is configurable in `config.ini` under `[network] → web_port`.
 
 ### Starting and Stopping Services
 
-Two helper scripts manage the service lifecycle. The critical rule is that the **watchdog must always be stopped before the FreezerPi services** — stopping a service without stopping the watchdog first means the IPC file stops updating, and the watchdog will force a hardware reboot 180 seconds later.
+Two helper scripts manage the service lifecycle. The critical rule is that the **watchdog must always be stopped before the IceboxHero services** — stopping a service without stopping the watchdog first means the IPC file stops updating, and the watchdog will force a hardware reboot 180 seconds later.
 
 ```bash
 sudo ./stop_services.sh     # watchdog first, then all five services
@@ -338,7 +338,7 @@ sudo ./start_services.sh    # all five services, then watchdog last
 - Confirms at least one DS18B20 sensor is visible on the 1-Wire bus at `/sys/bus/w1/devices/28-*`
 - Confirms `config.ini` no longer contains the placeholder sensor ROM IDs
 
-If either check fails it warns you and prompts before continuing. It also waits 5 seconds after starting the FreezerPi services before starting the watchdog, giving `sensor_service` time to write the initial IPC file.
+If either check fails it warns you and prompts before continuing. It also waits 5 seconds after starting the IceboxHero services before starting the watchdog, giving `sensor_service` time to write the initial IPC file.
 
 ### Working Without Sensors Connected (Setup and Maintenance Mode)
 
@@ -368,16 +368,16 @@ sudo ./setup.sh
 
 ### Setup
 
-Stop `freezer-sensor.service` first to avoid racing on the IPC file, then run the mock directly:
+Stop `icebox-sensor.service` first to avoid racing on the IPC file, then run the mock directly:
 
 ```bash
-sudo systemctl stop freezer-sensor.service
+sudo systemctl stop icebox-sensor.service
 
 # From the repo directory:
 python3 mock_sensors.py --mode sine
 
 # Or if already deployed by setup.sh:
-python3 /opt/freezerpi/mock_sensors.py --mode sine
+python3 /opt/iceboxhero/mock_sensors.py --mode sine
 ```
 
 By default the mock uses `poll_interval` from `config.ini` (60 seconds). Use `--interval` to override this for faster testing:
@@ -444,9 +444,9 @@ If nothing matches, check:
 
 ```bash
 # Live log stream from any service
-journalctl -u freezer-sensor.service -f
-journalctl -u freezer-alert.service -b     # current boot only
-journalctl -u freezer-db.service -n 50     # last 50 lines
+journalctl -u icebox-sensor.service -f
+journalctl -u icebox-alert.service -b     # current boot only
+journalctl -u icebox-db.service -n 50     # last 50 lines
 
 # Check current sensor readings
 cat /run/telemetry_state.json
@@ -455,7 +455,7 @@ cat /run/telemetry_state.json
 df -h /run
 
 # Check all service status at a glance
-systemctl status 'freezer-*'
+systemctl status 'icebox-*'
 ```
 
 ---
@@ -463,7 +463,7 @@ systemctl status 'freezer-*'
 ## Repository Structure
 
 ```
-freezerpi/
+iceboxhero/
 ├── README.md
 ├── LICENSE
 ├── .gitignore
@@ -486,11 +486,11 @@ freezerpi/
 ├── static/
 │   └── favicon.png              # Browser tab icon (burning freezer)
 └── systemd/
-    ├── freezer-sensor.service
-    ├── freezer-display.service
-    ├── freezer-alert.service
-    ├── freezer-db.service
-    └── freezer-web.service
+    ├── icebox-sensor.service
+    ├── icebox-display.service
+    ├── icebox-alert.service
+    ├── icebox-db.service
+    └── icebox-web.service
 ```
 
 ---

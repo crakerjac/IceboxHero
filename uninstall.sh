@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# FreezerPi Teardown Script
+# IceboxHero Teardown Script
 # Reverses everything setup.sh does, leaving the OS in its pre-setup state.
 # Use this to test setup.sh repeatedly without reimaging the SD card.
 #
@@ -8,8 +8,8 @@
 #   - All five systemd services (stopped, disabled, unit files deleted)
 #   - Weekly CRON job for database maintenance
 #   - logrotate configuration
-#   - /etc/tmpfiles.d/freezerpi.conf (runtime directory config)
-#   - /opt/freezerpi/ deployment directory
+#   - /etc/tmpfiles.d/iceboxhero.conf (runtime directory config)
+#   - /opt/iceboxhero/ deployment directory
 #   - /data/config/config.ini  (your working config — see warning below)
 #   - Python packages installed by setup.sh
 #   - Pillow build dependency apt packages
@@ -48,7 +48,7 @@ fi
 REAL_USER="${SUDO_USER:-pi}"
 
 echo ""
-echo -e "${BOLD}${YEL}FreezerPi — Teardown${RST}"
+echo -e "${BOLD}${YEL}IceboxHero — Teardown${RST}"
 echo    "This will undo everything setup.sh did."
 echo ""
 echo -e "${YEL}WARNING: /data/config/config.ini will be deleted.${RST}"
@@ -68,12 +68,12 @@ fi
 header "Removing systemd Services"
 
 SERVICES=(
-    freezer-sensor.service
-    freezer-display.service
-    freezer-alert.service
-    freezer-db.service
-    freezer-web.service
-    freezer-watchdog.service
+    icebox-sensor.service
+    icebox-display.service
+    icebox-alert.service
+    icebox-db.service
+    icebox-web.service
+    icebox-watchdog.service
 )
 
 for svc in "${SERVICES[@]}"; do
@@ -99,9 +99,9 @@ rm -f /etc/systemd/system/data.mount
 success "Removed: data.mount"
 
 # Restore /etc/fstab if setup.sh made a backup
-if [[ -f /etc/fstab.pre-freezerpi.bak ]]; then
-    cp /etc/fstab.pre-freezerpi.bak /etc/fstab
-    rm -f /etc/fstab.pre-freezerpi.bak
+if [[ -f /etc/fstab.pre-iceboxhero.bak ]]; then
+    cp /etc/fstab.pre-iceboxhero.bak /etc/fstab
+    rm -f /etc/fstab.pre-iceboxhero.bak
     success "Restored /etc/fstab from backup"
     info "Note: /data will now require a manual mount or fstab entry to be accessible"
 else
@@ -129,9 +129,9 @@ fi
 # =============================================================================
 header "Removing logrotate Configuration"
 
-if [[ -f /etc/logrotate.d/freezerpi ]]; then
-    rm /etc/logrotate.d/freezerpi
-    success "Removed: /etc/logrotate.d/freezerpi"
+if [[ -f /etc/logrotate.d/iceboxhero ]]; then
+    rm /etc/logrotate.d/iceboxhero
+    success "Removed: /etc/logrotate.d/iceboxhero"
 else
     info "Not found — skipping"
 fi
@@ -141,25 +141,25 @@ fi
 # =============================================================================
 header "Removing tmpfiles.d Configuration"
 
-if [[ -f /etc/tmpfiles.d/freezerpi.conf ]]; then
-    rm /etc/tmpfiles.d/freezerpi.conf
-    success "Removed: /etc/tmpfiles.d/freezerpi.conf"
+if [[ -f /etc/tmpfiles.d/iceboxhero.conf ]]; then
+    rm /etc/tmpfiles.d/iceboxhero.conf
+    success "Removed: /etc/tmpfiles.d/iceboxhero.conf"
 else
     info "Not found — skipping"
 fi
 
 # Clean up the runtime directories if they still exist
-rm -rf /run/freezerpi /run/freezer_db 2>/dev/null || true
-info "Removed /run/freezerpi and /run/freezer_db (if present)"
+rm -rf /run/iceboxhero /run/icebox_db 2>/dev/null || true
+info "Removed /run/iceboxhero and /run/icebox_db (if present)"
 
 # =============================================================================
 # STEP 4 — Remove deployed source code
 # =============================================================================
-header "Removing /opt/freezerpi/"
+header "Removing /opt/iceboxhero/"
 
-if [[ -d /opt/freezerpi ]]; then
-    rm -rf /opt/freezerpi
-    success "Removed: /opt/freezerpi/"
+if [[ -d /opt/iceboxhero ]]; then
+    rm -rf /opt/iceboxhero
+    success "Removed: /opt/iceboxhero/"
 else
     info "Not found — skipping"
 fi
@@ -227,7 +227,7 @@ if [[ -f /etc/watchdog.conf.bak ]]; then
     success "Restored /etc/watchdog.conf from backup"
 else
     cat > /etc/watchdog.conf <<'EOF'
-# watchdog.conf — restored to default state by freezerpi uninstall.sh
+# watchdog.conf — restored to default state by iceboxhero uninstall.sh
 # No devices or files are being monitored.
 EOF
     info "No backup found — reset /etc/watchdog.conf to inert default"
@@ -281,8 +281,8 @@ echo -e "${BOLD}What was removed:${RST}"
 echo  "  ✓ All five systemd services stopped, disabled, and deleted"
 echo  "  ✓ Weekly CRON job removed"
 echo  "  ✓ logrotate configuration removed"
-echo  "  ✓ /etc/tmpfiles.d/freezerpi.conf removed"
-echo  "  ✓ /opt/freezerpi/ deleted"
+echo  "  ✓ /etc/tmpfiles.d/iceboxhero.conf removed"
+echo  "  ✓ /opt/iceboxhero/ deleted"
 echo  "  ✓ /data/config/config.ini deleted"
 echo  "  ✓ Python packages uninstalled"
 echo  "  ✓ Pillow build dependency apt packages removed"

@@ -1,17 +1,17 @@
 [Unit]
-Description=Freezer Monitor — LCD Display Service
+Description=IceboxHero — LCD Display Service
 After=network.target
 RequiresMountsFor=/data
 
 [Service]
 Type=simple
 User=pi
-ExecStart=/usr/bin/python3 -u /opt/freezerpi/display_service.py
+ExecStart=/usr/bin/python3 -u /opt/iceboxhero/display_service.py
 StandardOutput=journal
 StandardError=journal
 Restart=always
 RestartSec=5
-ReadWritePaths=/run /data
+ReadWritePaths=/run/iceboxhero /run/icebox_db /data
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# FreezerPi — Start Services
+# IceboxHero — Start Services
 #
 # Usage:
 #   sudo ./start_services.sh
@@ -33,16 +33,16 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 SERVICES=(
-    freezer-sensor.service
-    freezer-display.service
-    freezer-alert.service
-    freezer-db.service
-    freezer-web.service
-    freezer-watchdog.service
+    icebox-sensor.service
+    icebox-display.service
+    icebox-alert.service
+    icebox-db.service
+    icebox-web.service
+    icebox-watchdog.service
 )
 
 echo ""
-echo -e "${BOLD}FreezerPi — Starting Services${RST}"
+echo -e "${BOLD}IceboxHero — Starting Services${RST}"
 echo ""
 
 # =============================================================================
@@ -94,7 +94,7 @@ fi
 # =============================================================================
 # Start services
 # =============================================================================
-header "Starting FreezerPi Services"
+header "Starting IceboxHero Services"
 
 for svc in "${SERVICES[@]}"; do
     if systemctl is-active --quiet "${svc}" 2>/dev/null; then
@@ -126,7 +126,7 @@ done
 
 echo ""
 echo -e "${BOLD}Useful diagnostics:${RST}"
-echo  "  journalctl -u freezer-sensor.service -f"
-echo  "  cat /run/freezerpi/telemetry_state.json"
-echo  "  systemctl status 'freezer-*'"
+echo  "  journalctl -u icebox-sensor.service -f"
+echo  "  cat /run/iceboxhero/telemetry_state.json"
+echo  "  systemctl status 'icebox-*'"
 echo ""

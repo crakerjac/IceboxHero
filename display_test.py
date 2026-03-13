@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-display_test.py — FreezerPi Display Identification Tool
+display_test.py — IceboxHero Display Identification Tool
 
 Cycles through known ST7735 configurations and pushes test patterns so you
 can visually identify your display. On success, writes the working parameters
@@ -286,7 +286,7 @@ def run_interactive():
     config = load_config()
 
     print("\n" + "=" * 60)
-    print("  FreezerPi — Display Identification Tool")
+    print("  IceboxHero — Display Identification Tool")
     print("=" * 60)
     print(f"\n  Config:    {CONFIG_PATH}")
     print(f"  DC pin:    GPIO{get_pin(config, 'lcd_dc_pin',  24)}")
@@ -363,7 +363,7 @@ def run_interactive():
                 print(f"\n[OK] Matched: {candidate['name']}")
                 write_display_config(candidate)
                 print("\nNext steps:")
-                print("  1. Restart display_service: sudo systemctl restart freezer-display.service")
+                print("  1. Restart display_service: sudo systemctl restart icebox-display.service")
                 print("  2. Or run the full start: sudo ./start_services.sh")
                 sys.exit(0)
             else:
@@ -378,7 +378,7 @@ def run_interactive():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="FreezerPi display identification tool")
+    parser = argparse.ArgumentParser(description="IceboxHero display identification tool")
     parser.add_argument('--list', action='store_true', help='List all candidates without testing')
     args = parser.parse_args()
 

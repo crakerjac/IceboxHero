@@ -6,7 +6,7 @@ disk space with VACUUM. Operates on the SD copy only — the RAM database is
 pruned automatically by db_logger.py during each 4-hour backup cycle.
 
 Schedule (add to crontab with: crontab -e):
-    0 3 * * 0 /usr/bin/python3 /opt/freezerpi/db_maintenance.py >> /data/logs/db_maintenance.log 2>&1
+    0 3 * * 0 /usr/bin/python3 /opt/iceboxhero/db_maintenance.py >> /data/logs/db_maintenance.log 2>&1
 """
 
 import sqlite3

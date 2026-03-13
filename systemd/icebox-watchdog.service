@@ -1,13 +1,13 @@
 [Unit]
-Description=Freezer Monitor — Hardware Watchdog Supervisor
-Documentation=https://github.com/crakerjac/freezerPi
-After=freezer-sensor.service
-Requires=freezer-sensor.service
+Description=IceboxHero — Hardware Watchdog Supervisor
+Documentation=https://github.com/crakerjac/IceboxHero
+After=icebox-sensor.service
+Requires=icebox-sensor.service
 
 [Service]
 Type=simple
 User=root
-# tmpfiles.d creates /run/freezerpi/telemetry_state.json at every boot before
+# tmpfiles.d creates /run/iceboxhero/telemetry_state.json at every boot before
 # services start, so the watchdog always has a file to monitor. sensor_service
 # overwrites it with real data within its first poll cycle. If sensor_service
 # ever stops updating the file for 180s, the watchdog triggers a reboot.

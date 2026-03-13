@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # =============================================================================
-# FreezerPi — Stop Services
+# IceboxHero — Stop Services
 #
 # Usage:
 #   sudo ./stop_services.sh
 #
-# Stops freezer-watchdog first so the hardware watchdog is disarmed before
-# FreezerPi services stop writing the IPC file. Then stops all services.
-# On next boot, freezer-watchdog.service re-arms automatically.
+# Stops icebox-watchdog first so the hardware watchdog is disarmed before
+# IceboxHero services stop writing the IPC file. Then stops all services.
+# On next boot, icebox-watchdog.service re-arms automatically.
 #
 # Use this script before:
 #   - Editing and redeploying source files
@@ -37,22 +37,22 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 SERVICES=(
-    freezer-watchdog.service
-    freezer-sensor.service
-    freezer-display.service
-    freezer-alert.service
-    freezer-db.service
-    freezer-web.service
+    icebox-watchdog.service
+    icebox-sensor.service
+    icebox-display.service
+    icebox-alert.service
+    icebox-db.service
+    icebox-web.service
 )
 
 echo ""
-echo -e "${BOLD}FreezerPi — Stopping Services${RST}"
+echo -e "${BOLD}IceboxHero — Stopping Services${RST}"
 echo ""
 
 # =============================================================================
 # Stop all services (watchdog first in the SERVICES array above)
 # =============================================================================
-header "Stopping FreezerPi Services"
+header "Stopping IceboxHero Services"
 
 for svc in "${SERVICES[@]}"; do
     if systemctl is-active --quiet "${svc}" 2>/dev/null; then

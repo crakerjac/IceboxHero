@@ -13,7 +13,7 @@ Key behaviors:
   - [ALERT] prefix for actionable alerts; [STATUS] prefix for informational boots.
   - email_alive ping fires after each successful send to verify SMTP health independently.
   - Sensor freeze detection: buzzer triggers if IPC monotonic clock stops advancing.
-  - DB corruption flag (/run/freezerpi/db_corrupted.flag): consumed once and converted to an email.
+  - DB corruption flag (/run/iceboxhero/db_corrupted.flag): consumed once and converted to an email.
 """
 
 import os
@@ -57,7 +57,7 @@ try:
 except Exception as e:
     _config_error_alert(e)
 
-IPC_FILE                 = "/run/freezerpi/telemetry_state.json"
+IPC_FILE                 = "/run/iceboxhero/telemetry_state.json"
 STALE_THRESHOLD_SECONDS  = config.getint('display', 'stale_timeout')
 SILENCE_DURATION_SECONDS = config.getint('alerts', 'silence_duration')
 EMAIL_COOLDOWN_SECONDS   = config.getint('alerts', 'email_cooldown')
@@ -136,7 +136,7 @@ def queue_email(alert_type, sensor_name, current_temp, ignore_cooldown=False, st
             return
 
     prefix  = "[STATUS] " if status_email else "[ALERT] "
-    subject = f"{prefix}Freezer Monitor {alert_type}: {sensor_name}"
+    subject = f"{prefix}IceboxHero {alert_type}: {sensor_name}"
 
     # Only append F unit for numeric readings — status messages pass plain strings
     reading = f"{current_temp}F" if isinstance(current_temp, (int, float)) else current_temp
@@ -161,8 +161,15 @@ def process_email_queue():
     """Background thread: sends queued emails every 5 minutes via SMTP SSL."""
     wait_for_ntp_sync()
 
-    # Fire the system boot notification once NTP is confirmed
-    queue_email("SYSTEM_BOOT", "Monitor", "System Online", ignore_cooldown=True, status_email=True)
+    # Fire the system boot notification once NTP is confirmed.
+    # Flag file prevents duplicate boot emails if the service restarts mid-boot.
+    BOOT_FLAG = "/run/iceboxhero/boot_email_sent"
+    if not os.path.exists(BOOT_FLAG):
+        try:
+            open(BOOT_FLAG, 'w').close()
+        except OSError:
+            pass
+        queue_email("SYSTEM_BOOT", "Monitor", "System Online", ignore_cooldown=True, status_email=True)
 
     smtp_server_addr = config.get('email', 'smtp_server')
     smtp_port        = config.getint('email', 'smtp_port')
@@ -175,6 +182,9 @@ def process_email_queue():
 
         with queue_lock:
             items_to_send = list(email_queue) if email_queue else []
+            # Clear items we're about to attempt — new alerts can still be added
+            # to email_queue during the send loop and won't be lost.
+            email_queue = [i for i in email_queue if i not in items_to_send]
 
         if items_to_send:
             failed_items = []
@@ -206,10 +216,10 @@ def process_email_queue():
                 print(f"SMTP connection failed, retrying in 5 min: {e}")
                 failed_items = items_to_send  # Retry the whole batch
 
-            # Rebuild queue: keep failed items and any new items added during send
-            with queue_lock:
-                sent_ids  = {id(i) for i in items_to_send if i not in failed_items}
-                email_queue = failed_items + [i for i in email_queue if id(i) not in sent_ids]
+            # Re-queue any failed items at the front for next attempt
+            if failed_items:
+                with queue_lock:
+                    email_queue = failed_items + email_queue
 
         time.sleep(300)  # 5 minutes
 
@@ -255,8 +265,12 @@ def main():
     email_thread = threading.Thread(target=process_email_queue, daemon=True)
     email_thread.start()
 
-    DB_CORRUPT_FLAG   = "/run/freezerpi/db_corrupted.flag"
+    DB_CORRUPT_FLAG    = "/run/iceboxhero/db_corrupted.flag"
     last_ipc_timestamp = 0
+    # Suppress sensor FAILURE alerts for the first 60 seconds after startup.
+    # sensor_service needs time to get first 1-wire readings — during this window
+    # it writes null values that would otherwise trigger spurious FAILURE emails.
+    startup_grace_until = time.monotonic() + 60
 
     while True:
         is_stale      = False
@@ -302,10 +316,11 @@ def main():
                         last_ipc_timestamp = ipc_timestamp
 
                     # --- Evaluate temperature alerts ---
+                    in_grace = time.monotonic() < startup_grace_until
                     for name, temp in sensor_data.items():
                         if temp is None:
                             trigger_buzzer = True
-                            if is_new_read:
+                            if is_new_read and not in_grace:
                                 sensor_failed_state[name] = True
                                 queue_email("FAILURE", name, "MISSING/READ ERROR")
                                 critical_read_counts[name] = 0

@@ -18,9 +18,9 @@ Stop with Ctrl+C. The IPC file is left in place after exit so downstream
 services don't immediately go stale — they will naturally time out after
 stale_timeout seconds (default: 600).
 
-NOTE: Stop freezer-sensor.service before running this, or they will race
+NOTE: Stop icebox-sensor.service before running this, or they will race
 to write the IPC file:
-    sudo systemctl stop freezer-sensor.service
+    sudo systemctl stop icebox-sensor.service
 """
 
 import os
@@ -31,8 +31,8 @@ import math
 import argparse
 from config_helper import load_config
 
-IPC_FILE = "/run/freezerpi/telemetry_state.json"
-IPC_TEMP = "/run/freezerpi/telemetry_state.tmp"
+IPC_FILE = "/run/iceboxhero/telemetry_state.json"
+IPC_TEMP = "/run/iceboxhero/telemetry_state.tmp"
 
 
 def write_ipc(sensor_data):
@@ -64,7 +64,7 @@ def format_display(sensor_data):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="FreezerPi mock sensor service")
+    parser = argparse.ArgumentParser(description="IceboxHero mock sensor service")
     parser.add_argument(
         '--mode',
         choices=['normal', 'warning', 'critical', 'missing', 'sine', 'ramp'],
@@ -87,18 +87,18 @@ def main():
         print("       Edit /data/config/config.ini before running mock_sensors.py")
         sys.exit(1)
 
-    # Warn if freezer-sensor.service is running — it will race on the IPC file
+    # Warn if icebox-sensor.service is running — it will race on the IPC file
     try:
         import subprocess
         result = subprocess.run(
-            ['systemctl', 'is-active', 'freezer-sensor.service'],
+            ['systemctl', 'is-active', 'icebox-sensor.service'],
             capture_output=True, text=True
         )
         if result.stdout.strip() == 'active':
-            print("\n[WARNING] freezer-sensor.service is currently running.")
+            print("\n[WARNING] icebox-sensor.service is currently running.")
             print("          It will race with mock_sensors.py to write the IPC file.")
             print("          Stop it first with:")
-            print("            sudo systemctl stop freezer-sensor.service")
+            print("            sudo systemctl stop icebox-sensor.service")
             print("")
             response = input("Continue anyway? [y/N] ").strip().lower()
             if response != 'y':
@@ -129,7 +129,7 @@ def main():
         base_temps = {name: round(temp_warning - 8.0, 1) for name in sensor_names}
 
     interval_source = f"{poll_interval}s (--interval override)" if args.interval is not None else f"{poll_interval}s (from config.ini)"
-    print(f"\nFreezerPi Mock Sensor Service")
+    print(f"\nIceboxHero Mock Sensor Service")
     print(f"Mode:          {args.mode}")
     print(f"Sensors:       {', '.join(sensor_names)}")
     print(f"Thresholds:    warning={temp_warning}F  critical={temp_critical}F")
