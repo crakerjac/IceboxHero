@@ -2,7 +2,7 @@
 
 <p align="center"><img src="static/color_logo.png" width="200" alt="IceboxHero logo"></p>
 
-A self-contained, fault-tolerant freezer temperature monitoring system built on a Raspberry Pi Zero 2 W. All acquisition, storage, alerting, web hosting, and watchdog functions run locally with no external backend dependency. Designed for unattended, always-on operation with aggressive SD card wear minimization and hardware-enforced auto-recovery.
+A self-contained, fault-tolerant freezer temperature monitoring system built on a Raspberry Pi Zero 2 W. All acquisition, storage, alerting, web hosting, and watchdog functions run locally. No cloud backend is required for core operation. Designed for unattended, always-on operation with aggressive SD card wear minimization and hardware-enforced auto-recovery.
 
 ---
 
@@ -53,33 +53,15 @@ All pins are configurable in `config.ini`.
 
 ## System Architecture
 
-Six independent software modules communicate exclusively through shared files on the RAM disk (`/run`). No module calls another directly — a crash in any single module does not affect the others. systemd restarts each module independently.
+Eight modules make up the full system. Module 0 (`config_helper.py`) is a shared library imported by all services — it is not a running process. Module 1 covers the OS layer: systemd units, tmpfiles.d, watchdog config, and the data mount. Modules 2–6 are independent long-running services that communicate exclusively through shared files on the RAM disk (`/run`). No service calls another directly — a crash in any single service does not affect the others. systemd restarts each service independently.
 
-```
-DS18B20 Sensors
-      │
-      ▼
-┌──────────────────┐    atomic write    ┌───────────────────────────┐
-│  sensor_service  │ ─────────────────▶ │  /run/telemetry_state     │
-│   (Module 2)     │                    │         .json             │
-└──────────────────┘                    └─────────────┬─────────────┘
-                                                      │  reads
-                           ┌──────────────────────────┼──────────────────────────┐
-                           ▼                          ▼                          ▼
-               ┌───────────────────┐    ┌──────────────────┐    ┌───────────────────┐
-               │  display_service  │    │  alert_service   │    │    db_logger      │
-               │   (Module 3)      │    │   (Module 4)     │    │   (Module 5)      │
-               └───────────────────┘    └──────────────────┘    └───────────────────┘
-                      │                        │                         │
-               ST7735S LCD              Buzzer / Email            RAM SQLite DB
-                                                                  /run/icebox_db/
-                                                                         │
-                                                                  4-hr SD backup
-                                                                  /data/db/
-                                                                         │
-                                                                  web_server (Module 6)
-                                                                  Flask dashboard :8080
-```
+<p align="center"><img src="docs/architecture-overview.png" alt="System Architecture Diagram"></p>
+
+> For full design notes and the complete module diagram see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+
+> **Note:** Module 0 (Configuration) and Module 1 (OS & Services) are not shown in the data-flow diagram — they are cross-cutting infrastructure. `config_helper.py` is imported by every module; the systemd units and watchdog underpin all six services.
+
+For full architecture diagrams, boot sequence, watchdog loop, email queue internals, and storage layout see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ### Module Summary
 
@@ -92,6 +74,8 @@ DS18B20 Sensors
 | 4 — Alerts & Email | `alert_service.py` | Buzzer control, GPIO interrupt, SMTP retry queue |
 | 5 — Database Logger | `db_logger.py`, `db_maintenance.py` | RAM SQLite DB; 4-hour SD backup; weekly pruning |
 | 6 — Web Server | `web_server.py`, `templates/index.html` | Flask REST API; 24-hour graph dashboard |
+
+> **Note:** Modules 0 and 1 are infrastructure — they configure and supervise the runtime modules but have no role in the live data flow. They are intentionally omitted from the architecture diagram.
 
 ---
 
@@ -438,7 +422,7 @@ If nothing matches, check:
 - **Blank screen** — VDD (3.3V), GND, and SPI wiring
 - **Backlight only** — display init failing silently, try a different candidate
 - **Colors shifted** — try BGR=True vs BGR=False variants
-- **Image cropped or offset** — try rowstart/colstart variants
+- **Image cropped or offset** — try x_offset/y_offset variants
 
 ---
 
@@ -487,6 +471,10 @@ iceboxhero/
 │   └── index.html               # Web dashboard UI
 ├── static/
 │   └── favicon.png              # Browser tab icon (burning freezer)
+├── docs/
+│   ├── architecture-overview.png  # Simple data flow diagram — displayed in README
+│   ├── architecture-full.png      # Full module diagram — displayed in ARCHITECTURE.md
+│   └── ARCHITECTURE.md            # Full design notes, runtime paths, watchdog detail
 └── systemd/
     ├── icebox-sensor.service
     ├── icebox-display.service
