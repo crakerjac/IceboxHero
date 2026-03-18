@@ -163,8 +163,12 @@ fi
 
 add_boot_param() {
     local param="$1"
-    if grep -qF "${param}" "${BOOT_CONFIG}"; then
+    if grep -qF "^${param}" "${BOOT_CONFIG}"; then
         info "Already set: ${param}"
+    elif grep -qF "#${param}" "${BOOT_CONFIG}"; then
+        # Uncomment existing commented-out line
+        sed -i "s|^#${param}|${param}|" "${BOOT_CONFIG}"
+        success "Uncommented: ${param}"
     else
         echo "${param}" >> "${BOOT_CONFIG}"
         success "Added: ${param}"
@@ -214,7 +218,8 @@ pip3 install --break-system-packages --retries 5 --root-user-action=ignore \
     flask \
     waitress \
     adafruit-blinka \
-    adafruit-circuitpython-rgb-display
+    adafruit-circuitpython-rgb-display \
+    adafruit-circuitpython-st7735r
 success "Python dependencies installed"
 
 # =============================================================================
@@ -226,6 +231,10 @@ install -d -m 755 -o "${REAL_USER}" -g "${REAL_USER}" \
     /opt/iceboxhero \
     /opt/iceboxhero/templates \
     /opt/iceboxhero/static
+
+# Watchdog repair script
+install -m 755 -o root -g root "${SCRIPT_DIR}/watchdog_repair.sh" /opt/iceboxhero/watchdog_repair.sh
+success "Deployed: watchdog_repair.sh"
 
 # Python modules
 for f in config_helper.py sensor_service.py display_service.py \
@@ -325,6 +334,8 @@ max-load-1       = 24
 # Trigger a hardware reboot if the sensor service stops updating the IPC file
 file   = /run/iceboxhero/telemetry_state.json
 change = 180
+# Run repair script before rebooting — sets pending email flag in alert_state.json
+repair-binary    = /opt/iceboxhero/watchdog_repair.sh
 EOF
 
 # Do NOT enable or start the watchdog here. The watchdog monitors the IPC

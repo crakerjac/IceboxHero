@@ -112,12 +112,14 @@ The live database resides entirely in RAM (`/run/icebox_db/freezer_monitor.db`).
 
 All thresholds are configurable in `config.ini`.
 
+> **Note:** The hardware watchdog reboots the Pi after 180 seconds of stale IPC data — well before the 10-minute STALE DATA display threshold is reached. The STALE DATA state is a second line of defence for the unlikely scenario where the watchdog daemon itself fails.
+
 ### Email Alerts
 
 Emails arrive with one of two subject prefixes to support inbox filtering:
 
-- **`[ALERT]`** — Requires immediate attention. Covers: CRITICAL, WARNING, FAILURE, SYSTEM_FREEZE, SYSTEM_ERROR.
-- **`[STATUS]`** — Informational only. Covers: SYSTEM_BOOT.
+- **`[ALERT]`** — Requires immediate attention. Covers: CRITICAL, WARNING, FAILURE, SYSTEM_FREEZE, SYSTEM_ERROR, WATCHDOG_REBOOT.
+- **`[STATUS]`** — Informational only. Covers: SYSTEM_BOOT, CHECKIN.
 
 **Recommended Gmail filter:** Subject contains `[STATUS] IceboxHero` → Skip Inbox, Mark as read, Apply label.
 
@@ -467,6 +469,7 @@ iceboxhero/
 ├── web_server.py                # Flask API and dashboard       (Module 6)
 ├── mock_sensors.py              # Dev tool — simulates sensors without hardware
 ├── display_test.py              # Dev tool — identifies display variant, writes config
+├── watchdog_repair.sh           # Called by watchdog before reboot — sets pending email flag
 ├── templates/
 │   └── index.html               # Web dashboard UI
 ├── static/

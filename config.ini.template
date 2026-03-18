@@ -47,13 +47,16 @@ width = 128
 height = 160
 rotation = 0
 bgr = True
-rowstart = 0
-colstart = 0
+x_offset = 0
+y_offset = 0
 
 [alerts]
 silence_duration = 3600
 email_cooldown = 3600
 sensor_freeze_seconds = 180
+# How often to send a periodic checkin email confirming the system and
+# email pipeline are working normally (days). Set to 0 to disable.
+checkin_interval_days = 30
 
 [email]
 smtp_server = smtp.gmail.com
