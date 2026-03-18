@@ -2,7 +2,6 @@
 Description=IceboxHero — Hardware Watchdog Supervisor
 Documentation=https://github.com/crakerjac/IceboxHero
 After=icebox-sensor.service
-Requires=icebox-sensor.service
 
 [Service]
 Type=simple

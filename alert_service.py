@@ -23,7 +23,9 @@ import smtplib
 import threading
 import urllib.request
 from email.message import EmailMessage
-from gpiozero import Buzzer, Button
+import os
+from gpiozero import Buzzer
+import RPi.GPIO as _RPIGPIO
 from config_helper import load_config
 
 # ---------------------------------------------------------------------------
@@ -78,10 +80,14 @@ except Exception as e:
     buzzer = None
 
 try:
-    silence_button = Button(config.getint('hardware', 'button_pin'), pull_up=True)
-    print("Silence button initialized.")
+    _btn_pin = config.getint('hardware', 'button_pin')
+    _RPIGPIO.setmode(_RPIGPIO.BCM)
+    _RPIGPIO.setwarnings(False)
+    _RPIGPIO.setup(_btn_pin, _RPIGPIO.IN, pull_up_down=_RPIGPIO.PUD_UP)
+    silence_button = _btn_pin
+    print(f"Silence button initialized on GPIO{_btn_pin} (polling mode).")
 except Exception as e:
-    print(f"WARNING: Silence button init failed (no hardware?): {e}. Button disabled.")
+    print(f"WARNING: Silence button init failed: {e}. Button disabled.")
     silence_button = None
 
 # ---------------------------------------------------------------------------
@@ -113,8 +119,22 @@ def silence_callback():
         buzzer.off()
 
 
-if silence_button:
-    silence_button.when_pressed = silence_callback
+def _button_poll_loop():
+    """Poll the silence button at 50 Hz — avoids kernel edge detection issues."""
+    last_state = True  # pull_up=True means unpressed=HIGH
+    while True:
+        try:
+            state = bool(_RPIGPIO.input(silence_button))
+            if last_state and not state:   # HIGH→LOW = button pressed
+                silence_callback()
+            last_state = state
+        except Exception:
+            pass
+        time.sleep(0.02)
+
+if silence_button is not None:
+    _btn_thread = threading.Thread(target=_button_poll_loop, daemon=True)
+    _btn_thread.start()
 
 
 # ---------------------------------------------------------------------------
