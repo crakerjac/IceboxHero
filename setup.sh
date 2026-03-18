@@ -145,6 +145,31 @@ if [[ ! -f "${SCRIPT_DIR}/config.ini.template" ]]; then
 fi
 success "Repository structure looks correct"
 
+# Confirm root filesystem is writable — overlay filesystem makes it read-only.
+# If overlay is active, all writes to /etc, /usr, etc. silently vanish on reboot.
+if grep -q "overlay" /proc/mounts 2>/dev/null | grep -q " / "; then
+    error "Root filesystem is read-only (overlay filesystem is active)."
+    echo ""
+    echo  "  Disable the overlay filesystem before running setup:"
+    echo  "    sudo raspi-config → Performance Options → Overlay File System → Disable"
+    echo  "    sudo reboot"
+    echo  "  Re-enable it after setup.sh completes successfully."
+    echo ""
+    exit 1
+fi
+# Secondary check: attempt a test write to /etc
+if ! touch /etc/.iceboxhero_write_test 2>/dev/null; then
+    error "Cannot write to /etc — root filesystem may be read-only."
+    echo ""
+    echo  "  If the overlay filesystem is enabled, disable it first:"
+    echo  "    sudo raspi-config → Performance Options → Overlay File System → Disable"
+    echo  "    sudo reboot"
+    echo ""
+    exit 1
+fi
+rm -f /etc/.iceboxhero_write_test
+success "Root filesystem is writable"
+
 # =============================================================================
 # STEP 1 — /boot/firmware/config.txt
 # =============================================================================
