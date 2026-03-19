@@ -45,8 +45,12 @@ def load_config(config_path=CONFIG_PATH, template_path=TEMPLATE_PATH):
     config = configparser.ConfigParser()
     config.optionxform = str
 
-    # Copy all template sections/keys as defaults
+    # Copy all template sections/keys as defaults.
+    # Skip [sensors] — ROM IDs are user-defined and must not be defaulted
+    # from the template (which only has placeholder values).
     for section in template.sections():
+        if section == "sensors":
+            continue
         if not config.has_section(section):
             config.add_section(section)
         for key, value in template.items(section):

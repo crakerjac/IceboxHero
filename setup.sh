@@ -292,6 +292,11 @@ install -m 644 -o "${REAL_USER}" -g "${REAL_USER}" \
     "${SCRIPT_DIR}/VERSION" "/opt/iceboxhero/VERSION"
 success "Deployed: VERSION"
 
+# Config template — deployed to /opt so config_helper.py can use it as defaults
+install -m 644 -o "${REAL_USER}" -g "${REAL_USER}" \
+    "${SCRIPT_DIR}/config.ini.template" "/opt/iceboxhero/config.ini.template"
+success "Deployed: config.ini.template"
+
 # =============================================================================
 # STEP 5 — /data directory structure
 # =============================================================================
@@ -513,6 +518,68 @@ else
 fi
 
 # =============================================================================
+# =============================================================================
+# Config diff — show keys in template that are missing from config.ini
+# =============================================================================
+
+print_config_diff() {
+    local config="/data/config/config.ini"
+    local template="/opt/iceboxhero/config.ini.template"
+
+    if [[ ! -f "$config" ]] || [[ ! -f "$template" ]]; then
+        return
+    fi
+
+    local missing
+    missing=$(python3 - << 'PYEOF'
+import configparser, sys
+
+template = configparser.ConfigParser()
+template.optionxform = str
+template.read("/opt/iceboxhero/config.ini.template")
+
+config = configparser.ConfigParser()
+config.optionxform = str
+config.read("/data/config/config.ini")
+
+missing = []
+for section in template.sections():
+    if section == "sensors":
+        continue
+    for key, value in template.items(section):
+        if not config.has_section(section) or not config.has_option(section, key):
+            missing.append((section, key, value))
+
+if missing:
+    cur_section = None
+    for section, key, value in missing:
+        if section != cur_section:
+            print(f"  [{section}]")
+            cur_section = section
+        print(f"    {key} = {value}")
+PYEOF
+)
+
+    if [[ -n "$missing" ]]; then
+        echo ""
+        echo -e "${BOLD}${YEL}============================================================${RST}"
+        echo -e "${BOLD}${YEL}  New config keys not yet in your config.ini:${RST}"
+        echo -e "${BOLD}${YEL}============================================================${RST}"
+        echo  "  Defaults will be used automatically — but you may want to"
+        echo  "  review and add these to /data/config/config.ini:"
+        echo ""
+        echo "$missing"
+        echo ""
+        echo  "  Edit: sudo nano /data/config/config.ini"
+        echo -e "${BOLD}${YEL}============================================================${RST}"
+        echo ""
+    else
+        echo ""
+        echo -e "  ${GRN}✓ config.ini has all current template keys${RST}"
+        echo ""
+    fi
+}
+
 # Done — Summary
 # =============================================================================
 echo ""
@@ -560,3 +627,5 @@ echo  "       journalctl -u icebox-sensor.service -f"
 echo  "       cat /run/iceboxhero/telemetry_state.json"
 echo  "       systemctl status 'icebox-*'"
 echo ""
+
+print_config_diff

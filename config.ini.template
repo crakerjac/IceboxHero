@@ -10,7 +10,7 @@
 # listed in .gitignore and will never be committed to the repository.
 
 [system]
-device_id = freezer-pi-01
+device_id = icebox-hero-01
 ntp_sync_year = 2024
 log_level = INFO
 

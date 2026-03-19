@@ -14,9 +14,9 @@ Key behaviors:
   - email_alive ping fires after each successful send to verify SMTP health independently.
   - Sensor freeze detection: buzzer triggers if IPC monotonic clock stops advancing.
   - DB corruption flag (/run/iceboxhero/db_corrupted.flag): consumed once and converted to an email.
-  - Watchdog reboot detection: compares last sensor heartbeat in /data/config/alert_state.json
-    to current time at boot. Sends [ALERT] WATCHDOG_REBOOT with EMAIL_COOLDOWN_SECONDS cooldown
-    to suppress inbox flooding during reboot loops.
+  - Watchdog reboot detection: watchdog_repair.sh sets pending_email flag in
+    /data/config/alert_state.json before reboot. On next boot, alert_service reads
+    the flag post-NTP and sends [ALERT] WATCHDOG_REBOOT with cooldown to suppress flooding.
 """
 
 import os
@@ -289,7 +289,7 @@ def read_alert_state():
             raise ValueError("corrupt")
         return state
     except Exception:
-        return {"last_sensor_heartbeat": 0.0, "watchdog_reboot_last_email": 0.0}
+        return {"watchdog_reboot_pending_email": False, "watchdog_reboot_last_email": 0.0, "last_checkin_email": 0.0}
 
 
 def write_alert_state(state):
