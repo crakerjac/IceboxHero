@@ -14,6 +14,9 @@ Key behaviors:
   - email_alive ping fires after each successful send to verify SMTP health independently.
   - Sensor freeze detection: buzzer triggers if IPC monotonic clock stops advancing.
   - DB corruption flag (/run/iceboxhero/db_corrupted.flag): consumed once and converted to an email.
+  - Watchdog reboot detection: watchdog_repair.sh sets pending_email flag in
+    /data/config/alert_state.json before reboot. On next boot, alert_service reads
+    the flag post-NTP and sends [ALERT] WATCHDOG_REBOOT with cooldown to suppress flooding.
 """
 
 import os
@@ -23,7 +26,6 @@ import smtplib
 import threading
 import urllib.request
 from email.message import EmailMessage
-import os
 from gpiozero import Buzzer
 import RPi.GPIO as _RPIGPIO
 from config_helper import load_config
@@ -60,11 +62,13 @@ except Exception as e:
     _config_error_alert(e)
 
 IPC_FILE                 = "/run/iceboxhero/telemetry_state.json"
+ALERT_STATE_FILE         = "/data/config/alert_state.json"
 STALE_THRESHOLD_SECONDS  = config.getint('display', 'stale_timeout')
 SILENCE_DURATION_SECONDS = config.getint('alerts', 'silence_duration')
 EMAIL_COOLDOWN_SECONDS   = config.getint('alerts', 'email_cooldown')
 NTP_SYNC_YEAR            = config.getint('system', 'ntp_sync_year')
 FREEZE_THRESHOLD         = config.getint('alerts', 'sensor_freeze_seconds')
+CHECKIN_INTERVAL_DAYS    = config.getint('alerts', 'checkin_interval_days', fallback=30)
 EMAIL_ALIVE_URL          = config.get('network', 'email_alive_url', fallback='')
 MAX_EMAIL_QUEUE          = 100
 
@@ -181,15 +185,43 @@ def process_email_queue():
     """Background thread: sends queued emails every 5 minutes via SMTP SSL."""
     wait_for_ntp_sync()
 
-    # Fire the system boot notification once NTP is confirmed.
-    # Flag file prevents duplicate boot emails if the service restarts mid-boot.
+    # Fire the appropriate boot notification once NTP is confirmed.
+    # BOOT_FLAG prevents duplicate emails if the service restarts mid-boot.
     BOOT_FLAG = "/run/iceboxhero/boot_email_sent"
     if not os.path.exists(BOOT_FLAG):
         try:
             open(BOOT_FLAG, 'w').close()
         except OSError:
             pass
-        queue_email("SYSTEM_BOOT", "Monitor", "System Online", ignore_cooldown=True, status_email=True)
+
+        alert_state = read_alert_state()
+
+        # --- Watchdog reboot detection ---
+        # watchdog_repair.sh sets pending_email=True before reboot if outside cooldown.
+        # We clear the flag here and record the send time post-NTP.
+        if alert_state.get("watchdog_reboot_pending_email", False):
+            write_alert_state({
+                "watchdog_reboot_pending_email": False,
+                "watchdog_reboot_last_email": time.time()
+            })
+            queue_email("WATCHDOG_REBOOT", "System",
+                        "Hardware watchdog triggered a reboot — sensor IPC file was stale.",
+                        ignore_cooldown=True)
+            print("Watchdog reboot detected — queued WATCHDOG_REBOOT email.")
+        else:
+            queue_email("SYSTEM_BOOT", "Monitor", "System Online",
+                        ignore_cooldown=True, status_email=True)
+
+        # --- Monthly checkin email ---
+        # Fires once per checkin_interval_days to confirm email pipeline is working.
+        last_checkin = alert_state.get("last_checkin_email", 0.0)
+        checkin_interval_seconds = CHECKIN_INTERVAL_DAYS * 86400
+        if (time.time() - last_checkin) >= checkin_interval_seconds:
+            write_alert_state({"last_checkin_email": time.time()})
+            queue_email("CHECKIN", "System",
+                        f"IceboxHero is running normally. Next checkin in {CHECKIN_INTERVAL_DAYS} days.",
+                        ignore_cooldown=True, status_email=True)
+            print(f"Queued {CHECKIN_INTERVAL_DAYS}-day checkin email.")
 
     smtp_server_addr = config.get('email', 'smtp_server')
     smtp_port        = config.getint('email', 'smtp_port')
@@ -242,6 +274,35 @@ def process_email_queue():
                     email_queue = failed_items + email_queue
 
         time.sleep(300)  # 5 minutes
+
+
+# ---------------------------------------------------------------------------
+# Alert state (persistent across reboots via /data/config/alert_state.json)
+# ---------------------------------------------------------------------------
+
+def read_alert_state():
+    """Read alert_state.json — returns defaults if missing or corrupt."""
+    try:
+        with open(ALERT_STATE_FILE, 'r') as f:
+            state = json.load(f)
+        if not isinstance(state, dict):
+            raise ValueError("corrupt")
+        return state
+    except Exception:
+        return {"watchdog_reboot_pending_email": False, "watchdog_reboot_last_email": 0.0, "last_checkin_email": 0.0}
+
+
+def write_alert_state(state):
+    """Atomically write alert_state.json. Preserves existing keys."""
+    try:
+        existing = read_alert_state()
+        existing.update(state)
+        tmp = ALERT_STATE_FILE + ".tmp"
+        with open(tmp, 'w') as f:
+            json.dump(existing, f)
+        os.replace(tmp, ALERT_STATE_FILE)
+    except Exception as e:
+        print(f"WARNING: Failed to write alert_state: {e}")
 
 
 # ---------------------------------------------------------------------------

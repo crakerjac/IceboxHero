@@ -106,16 +106,18 @@ def write_ipc_state(sensor_data):
         print(f"Failed to write IPC state: {e}")
 
 
+
 def main():
     print("Starting Sensor Acquisition Service...")
 
     config = load_config()
-    poll_interval     = config.getint('sampling', 'poll_interval')
+    poll_interval      = config.getint('sampling', 'poll_interval')
     configured_sensors = dict(config.items('sensors'))  # {"28-xxxx": "big_freezer", ...}
 
     # Write an initial all-None boot state so consumers don't crash on missing file
     boot_state = {name: None for name in configured_sensors.values()}
     write_ipc_state(boot_state)
+
 
     while True:
         loop_start_time = time.monotonic()
@@ -131,6 +133,7 @@ def main():
                 print(f"Missing device path for: {rom_id} ({logical_name})")
 
         write_ipc_state(current_readings)
+
 
         # Drift-free sleep: subtract actual read time from the configured interval
         elapsed    = time.monotonic() - loop_start_time

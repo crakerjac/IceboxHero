@@ -145,6 +145,31 @@ if [[ ! -f "${SCRIPT_DIR}/config.ini.template" ]]; then
 fi
 success "Repository structure looks correct"
 
+# Confirm root filesystem is writable — overlay filesystem makes it read-only.
+# If overlay is active, all writes to /etc, /usr, etc. silently vanish on reboot.
+if grep -q "overlay" /proc/mounts 2>/dev/null | grep -q " / "; then
+    error "Root filesystem is read-only (overlay filesystem is active)."
+    echo ""
+    echo  "  Disable the overlay filesystem before running setup:"
+    echo  "    sudo raspi-config → Performance Options → Overlay File System → Disable"
+    echo  "    sudo reboot"
+    echo  "  Re-enable it after setup.sh completes successfully."
+    echo ""
+    exit 1
+fi
+# Secondary check: attempt a test write to /etc
+if ! touch /etc/.iceboxhero_write_test 2>/dev/null; then
+    error "Cannot write to /etc — root filesystem may be read-only."
+    echo ""
+    echo  "  If the overlay filesystem is enabled, disable it first:"
+    echo  "    sudo raspi-config → Performance Options → Overlay File System → Disable"
+    echo  "    sudo reboot"
+    echo ""
+    exit 1
+fi
+rm -f /etc/.iceboxhero_write_test
+success "Root filesystem is writable"
+
 # =============================================================================
 # STEP 1 — /boot/firmware/config.txt
 # =============================================================================
@@ -163,8 +188,12 @@ fi
 
 add_boot_param() {
     local param="$1"
-    if grep -qF "${param}" "${BOOT_CONFIG}"; then
+    if grep -qF "^${param}" "${BOOT_CONFIG}"; then
         info "Already set: ${param}"
+    elif grep -qF "#${param}" "${BOOT_CONFIG}"; then
+        # Uncomment existing commented-out line
+        sed -i "s|^#${param}|${param}|" "${BOOT_CONFIG}"
+        success "Uncommented: ${param}"
     else
         echo "${param}" >> "${BOOT_CONFIG}"
         success "Added: ${param}"
@@ -214,7 +243,8 @@ pip3 install --break-system-packages --retries 5 --root-user-action=ignore \
     flask \
     waitress \
     adafruit-blinka \
-    adafruit-circuitpython-rgb-display
+    adafruit-circuitpython-rgb-display \
+    adafruit-circuitpython-st7735r
 success "Python dependencies installed"
 
 # =============================================================================
@@ -226,6 +256,10 @@ install -d -m 755 -o "${REAL_USER}" -g "${REAL_USER}" \
     /opt/iceboxhero \
     /opt/iceboxhero/templates \
     /opt/iceboxhero/static
+
+# Watchdog repair script
+install -m 755 -o root -g root "${SCRIPT_DIR}/watchdog_repair.sh" /opt/iceboxhero/watchdog_repair.sh
+success "Deployed: watchdog_repair.sh"
 
 # Python modules
 for f in config_helper.py sensor_service.py display_service.py \
@@ -257,6 +291,11 @@ fi
 install -m 644 -o "${REAL_USER}" -g "${REAL_USER}" \
     "${SCRIPT_DIR}/VERSION" "/opt/iceboxhero/VERSION"
 success "Deployed: VERSION"
+
+# Config template — deployed to /opt so config_helper.py can use it as defaults
+install -m 644 -o "${REAL_USER}" -g "${REAL_USER}" \
+    "${SCRIPT_DIR}/config.ini.template" "/opt/iceboxhero/config.ini.template"
+success "Deployed: config.ini.template"
 
 # =============================================================================
 # STEP 5 — /data directory structure
@@ -325,6 +364,8 @@ max-load-1       = 24
 # Trigger a hardware reboot if the sensor service stops updating the IPC file
 file   = /run/iceboxhero/telemetry_state.json
 change = 180
+# Run repair script before rebooting — sets pending email flag in alert_state.json
+repair-binary    = /opt/iceboxhero/watchdog_repair.sh
 EOF
 
 # Do NOT enable or start the watchdog here. The watchdog monitors the IPC
@@ -477,6 +518,68 @@ else
 fi
 
 # =============================================================================
+# =============================================================================
+# Config diff — show keys in template that are missing from config.ini
+# =============================================================================
+
+print_config_diff() {
+    local config="/data/config/config.ini"
+    local template="/opt/iceboxhero/config.ini.template"
+
+    if [[ ! -f "$config" ]] || [[ ! -f "$template" ]]; then
+        return
+    fi
+
+    local missing
+    missing=$(python3 - << 'PYEOF'
+import configparser, sys
+
+template = configparser.ConfigParser()
+template.optionxform = str
+template.read("/opt/iceboxhero/config.ini.template")
+
+config = configparser.ConfigParser()
+config.optionxform = str
+config.read("/data/config/config.ini")
+
+missing = []
+for section in template.sections():
+    if section == "sensors":
+        continue
+    for key, value in template.items(section):
+        if not config.has_section(section) or not config.has_option(section, key):
+            missing.append((section, key, value))
+
+if missing:
+    cur_section = None
+    for section, key, value in missing:
+        if section != cur_section:
+            print(f"  [{section}]")
+            cur_section = section
+        print(f"    {key} = {value}")
+PYEOF
+)
+
+    if [[ -n "$missing" ]]; then
+        echo ""
+        echo -e "${BOLD}${YEL}============================================================${RST}"
+        echo -e "${BOLD}${YEL}  New config keys not yet in your config.ini:${RST}"
+        echo -e "${BOLD}${YEL}============================================================${RST}"
+        echo  "  Defaults will be used automatically — but you may want to"
+        echo  "  review and add these to /data/config/config.ini:"
+        echo ""
+        echo "$missing"
+        echo ""
+        echo  "  Edit: sudo nano /data/config/config.ini"
+        echo -e "${BOLD}${YEL}============================================================${RST}"
+        echo ""
+    else
+        echo ""
+        echo -e "  ${GRN}✓ config.ini has all current template keys${RST}"
+        echo ""
+    fi
+}
+
 # Done — Summary
 # =============================================================================
 echo ""
@@ -524,3 +627,5 @@ echo  "       journalctl -u icebox-sensor.service -f"
 echo  "       cat /run/iceboxhero/telemetry_state.json"
 echo  "       systemctl status 'icebox-*'"
 echo ""
+
+print_config_diff

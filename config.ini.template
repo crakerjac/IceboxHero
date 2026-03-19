@@ -10,7 +10,7 @@
 # listed in .gitignore and will never be committed to the repository.
 
 [system]
-device_id = freezer-pi-01
+device_id = icebox-hero-01
 ntp_sync_year = 2024
 log_level = INFO
 
@@ -27,7 +27,7 @@ lcd_dc_pin = 24
 lcd_rst_pin = 25
 # Backlight pin — wire BLK to a GPIO for software control, or to 3.3V for always-on.
 # If wired to 3.3V, set lcd_bl_pin = none
-lcd_bl_pin = 18
+lcd_bl_pin = none
 # 1-Wire bus pin (Requires: dtoverlay=w1-gpio,gpiopin=4 in /boot/firmware/config.txt)
 one_wire_pin = 4
 
@@ -45,15 +45,18 @@ stale_timeout = 600
 # and auto-populate these values.
 width = 128
 height = 160
-rotation = 0
+rotation = 90
 bgr = True
-rowstart = 0
-colstart = 0
+x_offset = 0
+y_offset = 0
 
 [alerts]
 silence_duration = 3600
 email_cooldown = 3600
 sensor_freeze_seconds = 180
+# How often to send a periodic checkin email confirming the system and
+# email pipeline are working normally (days). Set to 0 to disable.
+checkin_interval_days = 30
 
 [email]
 smtp_server = smtp.gmail.com
