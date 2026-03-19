@@ -109,18 +109,7 @@
                     });
                 }
 
-                // Update watchdog indicator from same API response
-                const wd = document.getElementById('watchdog-status');
-                if (data.watchdog_active === true) {
-                    wd.className = 'watchdog wd-active';
-                    wd.innerHTML = '&#9679; Watchdog: active';
-                } else if (data.watchdog_active === false) {
-                    wd.className = 'watchdog wd-inactive';
-                    wd.innerHTML = '&#9679; Watchdog: DISABLED';
-                } else {
-                    wd.className = 'watchdog wd-unknown';
-                    wd.innerHTML = '&#9679; Watchdog: unknown';
-                }
+                // Watchdog status is updated by updateStatus() every 5 minutes
             })
             .catch(err => console.error('Failed to fetch current temps:', err));
     }
@@ -239,6 +228,19 @@
                 } else {
                     cpuEl.textContent = 'N/A';
                     cpuEl.className = 'stat-value';
+                }
+
+                // Watchdog status
+                const wd = document.getElementById('watchdog-status');
+                if (data.watchdog_active === true) {
+                    wd.className = 'watchdog wd-active';
+                    wd.innerHTML = '&#9679; Watchdog: active';
+                } else if (data.watchdog_active === false) {
+                    wd.className = 'watchdog wd-inactive';
+                    wd.innerHTML = '&#9679; Watchdog: DISABLED';
+                } else {
+                    wd.className = 'watchdog wd-unknown';
+                    wd.innerHTML = '&#9679; Watchdog: unknown';
                 }
             })
             .catch(err => console.error('Failed to fetch status:', err));

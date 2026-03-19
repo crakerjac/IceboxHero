@@ -5,9 +5,10 @@ Serves a local Flask dashboard on port 8080 (configurable).
 Two data sources:
   - /api/current  → reads /run/iceboxhero/telemetry_state.json (RAM, updates every 60 s)
   - /api/history  → queries the RAM SQLite database for the last 24 hours
+  - /api/status   → system health metrics including watchdog state
 
-The dashboard JS polls /api/current every 30 seconds and /api/history every
-5 minutes. Chart.js must be downloaded and placed at static/chart.min.js —
+The dashboard JS polls /api/current every 30 seconds and /api/history + /api/status
+every 5 minutes. Chart.js must be downloaded and placed at static/chart.min.js —
 the dashboard is designed to work without any internet connectivity.
 """
 
@@ -15,6 +16,8 @@ import os
 import json
 import sqlite3
 import time
+import subprocess
+import shutil
 
 from flask import Flask, jsonify, render_template
 from config_helper import load_config
@@ -49,17 +52,17 @@ def safe_read_json(path, retries=3):
 
 
 def get_current_state():
-    """Returns the latest IPC payload from RAM disk."""
+    """Returns the latest IPC payload from RAM disk as a dict."""
     if not os.path.exists(IPC_FILE):
         return {"error": "Booting or IPC file missing", "sensors": {}}
 
-    try:
-        payload = safe_read_json(IPC_FILE)
-        if payload is None:
-            return {"error": "IPC read error", "sensors": {}}
-        return payload
-    except (json.JSONDecodeError, IOError):
+    payload = safe_read_json(IPC_FILE)
+    if payload is None:
         return {"error": "IPC read error", "sensors": {}}
+    # Guard against a valid JSON non-dict (e.g. a list) corrupting downstream mutations
+    if not isinstance(payload, dict):
+        return {"error": "IPC format error", "sensors": {}}
+    return payload
 
 
 def get_24h_history():
@@ -91,7 +94,6 @@ def get_24h_history():
 def get_watchdog_status():
     """Returns watchdog active state by checking icebox-watchdog.service."""
     try:
-        import subprocess
         result = subprocess.run(
             ['systemctl', 'is-active', 'icebox-watchdog'],
             capture_output=True, text=True, timeout=2
@@ -103,9 +105,6 @@ def get_watchdog_status():
 
 def get_system_status():
     """Returns system health metrics for the dashboard status panel."""
-    import subprocess
-    import shutil
-
     status = {}
 
     # IPC file age in seconds
@@ -114,6 +113,10 @@ def get_system_status():
         status['ipc_age_seconds'] = int(time.time() - mtime)
     except OSError:
         status['ipc_age_seconds'] = None
+
+    # Watchdog status — included here since /api/status is polled every 5 min,
+    # avoiding a subprocess fork on every 30-second /api/current poll
+    status['watchdog_active'] = get_watchdog_status()
 
     # Last SD backup time — db_logger writes a timestamp file on each backup
     BACKUP_TS_FILE = "/data/db/last_backup"
@@ -147,13 +150,12 @@ def get_system_status():
             status['uptime'] = f"{hours}h {minutes}m"
         else:
             status['uptime'] = f"{minutes}m"
-    except OSError:
+    except Exception:
         status['uptime'] = None
 
     # Pi CPU temperature
     try:
         result = subprocess.run(['vcgencmd', 'measure_temp'], capture_output=True, text=True, timeout=2)
-        # Output format: temp=42.8'C
         temp_str = result.stdout.strip().replace("temp=", "").replace("'C", "")
         status['cpu_temp_c'] = float(temp_str)
     except Exception:
@@ -171,9 +173,7 @@ def index():
 @app.route('/api/current')
 def api_current():
     """Returns current sensor readings from the RAM IPC file."""
-    state = get_current_state()
-    state['watchdog_active'] = get_watchdog_status()
-    return jsonify(state)
+    return jsonify(get_current_state())
 
 
 @app.route('/api/history')
@@ -184,7 +184,7 @@ def api_history():
 
 @app.route('/api/status')
 def api_status():
-    """Returns system health metrics for the status panel."""
+    """Returns system health metrics including watchdog state."""
     return jsonify(get_system_status())
 
 

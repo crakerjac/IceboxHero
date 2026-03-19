@@ -72,7 +72,7 @@ For full architecture diagrams, boot sequence, watchdog loop, email queue intern
 | 2 — Sensor Acquisition | `sensor_service.py` | DS18B20 1-Wire reads; atomic IPC file writer |
 | 3 — Display | `display_service.py` | ST7735S LCD driver; color-coded status rendering |
 | 4 — Alerts & Email | `alert_service.py` | Buzzer control, GPIO interrupt, SMTP retry queue |
-| 5 — Database Logger | `db_logger.py`, `db_maintenance.py` | RAM SQLite DB; 4-hour SD backup; weekly pruning |
+| 5 — Database Logger | `db_logger.py` | RAM SQLite DB; 4-hour SD backup; automatic pruning on each backup cycle |
 | 6 — Web Server | `web_server.py`, `templates/index.html` | Flask REST API; 24-hour graph dashboard |
 
 > **Note:** Modules 0 and 1 are infrastructure — they configure and supervise the runtime modules but have no role in the live data flow. They are intentionally omitted from the architecture diagram.
@@ -465,7 +465,6 @@ iceboxhero/
 ├── display_service.py           # ST7735S LCD display service   (Module 3)
 ├── alert_service.py             # Buzzer, button, email alerts  (Module 4)
 ├── db_logger.py                 # RAM SQLite DB + SD backup     (Module 5)
-├── db_maintenance.py            # Weekly CRON pruning script    (Module 5)
 ├── web_server.py                # Flask API and dashboard       (Module 6)
 ├── mock_sensors.py              # Dev tool — simulates sensors without hardware
 ├── display_test.py              # Dev tool — identifies display variant, writes config

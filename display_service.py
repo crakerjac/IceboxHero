@@ -332,13 +332,19 @@ def main():
     else:
         buf_width, buf_height = disp_width, disp_height
 
-    last_ipc_timestamp  = 0
+    last_ipc_timestamp   = 0
     critical_read_counts = {}
+    parse_error_count    = 0   # Consecutive JSON parse failures before alarming
+    # Startup grace: suppress CRITICAL state for the first poll cycle (up to
+    # poll_interval seconds) so the boot-time all-None IPC state doesn't
+    # flash a false critical alarm before real sensor data arrives.
+    startup_grace_until  = time.monotonic() + config.getint('sampling', 'poll_interval')
 
     while True:
         is_stale    = False
         sensor_data = {}
         state       = "NORMAL"
+        in_grace    = time.monotonic() < startup_grace_until
 
         if not os.path.exists(IPC_FILE):
             state = "NORMAL"   # Show empty/booting state
@@ -351,8 +357,14 @@ def main():
                 payload = safe_read_json(IPC_FILE)
 
                 if payload is None:
-                    state = "CRITICAL"
+                    # Treat read failure same as missing file during grace period
+                    if not in_grace:
+                        parse_error_count += 1
+                        if parse_error_count >= 3:
+                            state = "CRITICAL"
+                    # else: stay NORMAL during boot grace
                 else:
+                    parse_error_count = 0   # Reset on successful read
                     sensor_data   = payload.get("sensors", {})
                     ipc_timestamp = payload.get("timestamp", 0)
 
@@ -360,17 +372,25 @@ def main():
                     if ipc_timestamp != last_ipc_timestamp:
                         last_ipc_timestamp = ipc_timestamp
                         for name, temp in sensor_data.items():
-                            if temp is not None and temp >= temp_critical:
-                                critical_read_counts[name] = critical_read_counts.get(name, 0) + 1
-                            else:
-                                critical_read_counts[name] = 0
+                            if temp is not None:
+                                # Only update counter for valid readings
+                                if temp >= temp_critical:
+                                    critical_read_counts[name] = critical_read_counts.get(name, 0) + 1
+                                else:
+                                    critical_read_counts[name] = 0
+                            # None reading: leave counter unchanged — a dead sensor
+                            # during an active critical condition should not reset the alarm
 
-                    state = evaluate_worst_state(
-                        sensor_data, is_stale, temp_warning, temp_critical, critical_read_counts
-                    )
+                    if not in_grace:
+                        state = evaluate_worst_state(
+                            sensor_data, is_stale, temp_warning, temp_critical, critical_read_counts
+                        )
 
             except (json.JSONDecodeError, KeyError):
-                state = "CRITICAL"
+                if not in_grace:
+                    parse_error_count += 1
+                    if parse_error_count >= 3:
+                        state = "CRITICAL"
 
         frame = draw_frame(sensor_data, sensor_order, state, is_stale, buf_width, buf_height)
         push_to_display(frame)

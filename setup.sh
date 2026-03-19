@@ -22,7 +22,6 @@
 #   - Configures /etc/watchdog.conf
 #   - Installs logrotate configuration
 #   - Installs and enables all five systemd services
-#   - Adds the weekly database maintenance CRON job
 #
 # What you must do manually (before running this script):
 #   - Create and mount the /data ext4 partition (see README Step 1)
@@ -262,8 +261,18 @@ install -m 755 -o root -g root "${SCRIPT_DIR}/watchdog_repair.sh" /opt/iceboxher
 success "Deployed: watchdog_repair.sh"
 
 # Python modules
+# Helper scripts
+for f in start_services.sh stop_services.sh update.sh; do
+    if [[ -f "${SCRIPT_DIR}/${f}" ]]; then
+        install -m 755 -o "${REAL_USER}" -g "${REAL_USER}" \
+            "${SCRIPT_DIR}/${f}" "/opt/iceboxhero/${f}"
+        success "Deployed: ${f}"
+    fi
+done
+
+# Python modules
 for f in config_helper.py sensor_service.py display_service.py \
-          alert_service.py db_logger.py db_maintenance.py web_server.py mock_sensors.py display_test.py; do
+          alert_service.py db_logger.py web_server.py mock_sensors.py display_test.py; do
     if [[ -f "${SCRIPT_DIR}/${f}" ]]; then
         install -m 644 -o "${REAL_USER}" -g "${REAL_USER}" \
             "${SCRIPT_DIR}/${f}" "/opt/iceboxhero/${f}"
@@ -407,12 +416,13 @@ info "Reboot required for this to take effect"
 header "Installing logrotate Configuration"
 
 cat > /etc/logrotate.d/iceboxhero <<'EOF'
-/data/logs/db_maintenance.log {
+/data/logs/*.log {
     weekly
-    rotate 4
+    rotate 8
     compress
     missingok
     notifempty
+    copytruncate
 }
 EOF
 
@@ -502,20 +512,8 @@ info "Services will start automatically on next boot."
 info "To start them now (after editing config.ini): sudo ./start_services.sh"
 
 # =============================================================================
-# STEP 12 — CRON job for weekly database maintenance
-# =============================================================================
-header "Installing Weekly Maintenance CRON Job"
-
-CRON_JOB="0 3 * * 0 /usr/bin/python3 /opt/iceboxhero/db_maintenance.py >> /data/logs/db_maintenance.log 2>&1"
-
-# Add only if not already present
-EXISTING_CRON=$(crontab -u "${REAL_USER}" -l 2>/dev/null || true)
-if echo "${EXISTING_CRON}" | grep -qF "db_maintenance.py"; then
-    info "CRON job already present — skipping."
-else
-    (echo "${EXISTING_CRON}"; echo "${CRON_JOB}") | crontab -u "${REAL_USER}" -
-    success "CRON job added for user: ${REAL_USER}"
-fi
+# STEP 12 — (Database maintenance CRON removed: db_logger.py prunes RAM on each
+# 4-hour backup cycle, and the SD backup is always a full mirror of RAM.)
 
 # =============================================================================
 # =============================================================================
@@ -597,7 +595,6 @@ echo  "  ✓ Watchdog daemon configured (auto-armed at boot by icebox-watchdog.s
 echo  "  ✓ tmpfiles.d configured (/run/iceboxhero and /run/icebox_db created, pi-owned)"
 echo  "  ✓ logrotate configured"
 echo  "  ✓ Five systemd services installed and enabled"
-echo  "  ✓ Weekly CRON job scheduled for database maintenance"
 echo ""
 echo -e "${BOLD}${YEL}Required manual steps before the system will run:${RST}"
 echo ""
@@ -615,7 +612,7 @@ echo -e "  ${BOLD}3. Reboot to activate hardware changes:${RST}"
 echo  "       sudo reboot"
 echo ""
 echo -e "  ${BOLD}4. Connect sensors, then start all services:${RST}"
-echo  "       sudo ./start_services.sh"
+echo  "       sudo /opt/iceboxhero/start_services.sh"
 echo  "     This confirms sensors are detected, starts all services, and arms the watchdog last."
 echo ""
 echo -e "  ${BOLD}5. Verify everything is working, then enable the read-only overlay:${RST}"

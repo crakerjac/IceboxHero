@@ -106,6 +106,7 @@ queue_lock              = threading.Lock()
 last_email_sent_times   = {}  # {"sensor_ALERTTYPE": monotonic_timestamp}
 critical_read_counts    = {}  # {"sensor_name": consecutive_critical_count}
 sensor_failed_state     = {}  # {"sensor_name": bool} — True while sensor is reporting None
+sensor_warning_state    = {}  # {"sensor_name": bool} — True while sensor is in warning zone
 last_freeze_email       = 0
 
 
@@ -403,12 +404,14 @@ def main():
                             trigger_buzzer = True
                             if is_new_read and not in_grace:
                                 sensor_failed_state[name] = True
+                                sensor_warning_state[name] = False
                                 queue_email("FAILURE", name, "MISSING/READ ERROR")
                                 critical_read_counts[name] = 0
                         else:
                             # Sensor recovered from a previous FAILURE state
                             if is_new_read and sensor_failed_state.get(name, False):
                                 sensor_failed_state[name] = False
+                                sensor_warning_state[name] = False
                                 queue_email("RECOVERED", name, temp, status_email=True)
 
                             if temp >= temp_critical:
@@ -422,7 +425,12 @@ def main():
                                 if is_new_read:
                                     critical_read_counts[name] = 0
                                     if temp >= temp_warning:
-                                        queue_email("WARNING", name, temp)
+                                        # Only email on transition INTO warning state
+                                        if not sensor_warning_state.get(name, False):
+                                            sensor_warning_state[name] = True
+                                            queue_email("WARNING", name, temp)
+                                    else:
+                                        sensor_warning_state[name] = False
 
             except (json.JSONDecodeError, KeyError):
                 pass  # Handled gracefully on the next loop iteration
@@ -433,7 +441,10 @@ def main():
 
         if buzzer:
             if trigger_buzzer:
-                if not is_silenced and not buzzer.is_active:
+                if is_silenced:
+                    if buzzer.is_active:
+                        buzzer.off()   # Explicitly silence even when alarm condition persists
+                elif not buzzer.is_active:
                     buzzer.on()
             else:
                 if buzzer.is_active:

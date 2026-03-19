@@ -10,58 +10,60 @@
 # attempt repair again rather than proceeding to reboot.
 
 ALERT_STATE="/data/config/alert_state.json"
-# Must match email_cooldown in config.ini (default 3600 seconds)
-COOLDOWN=3600
+LOG_FILE="/data/logs/watchdog_repair.log"
+COOLDOWN=3600        # Must match email_cooldown in config.ini
+SERVICE_USER="pi"    # User that runs icebox-alert.service
 
 log() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') watchdog_repair: $*" | tee -a /data/logs/watchdog_repair.log
+    echo "$(date '+%Y-%m-%d %H:%M:%S') watchdog_repair: $*" | tee -a "${LOG_FILE}"
 }
 
 log "Repair script triggered — sensor IPC file stale."
 
-# Read last email timestamp from alert_state.json
+# Read last email timestamp
 if [ -f "$ALERT_STATE" ]; then
     last_email=$(python3 -c "
-import json, sys
+import json
 try:
     d = json.load(open('$ALERT_STATE'))
     print(d.get('watchdog_reboot_last_email', 0))
 except Exception:
     print(0)
-" 2>/dev/null)
+" 2>&1)
+    log "Read last_email: ${last_email}"
 else
     last_email=0
 fi
 
 now=$(date +%s)
-age=$((now - ${last_email%.*}))  # strip decimal
+age=$((now - ${last_email%.*}))
 
 log "Last watchdog email: ${last_email} (${age}s ago, cooldown=${COOLDOWN}s)"
 
 if [ "$age" -gt "$COOLDOWN" ]; then
     log "Outside cooldown — setting pending email flag."
-    python3 - << PYEOF
-import json, os
-
-path = "$ALERT_STATE"
-tmp  = path + ".tmp"
-
+    python3 -c "
+import json, os, pwd
+path = '$ALERT_STATE'
+tmp  = path + '.tmp'
 try:
-    with open(path, 'r') as f:
+    with open(path) as f:
         state = json.load(f)
     if not isinstance(state, dict):
         raise ValueError
 except Exception:
     state = {}
-
-state["watchdog_reboot_pending_email"] = True
-# Leave watchdog_reboot_last_email unchanged — alert_service sets it post-NTP
-
+state['watchdog_reboot_pending_email'] = True
 with open(tmp, 'w') as f:
     json.dump(state, f)
+try:
+    pw = pwd.getpwnam('$SERVICE_USER')
+    os.chown(tmp, pw.pw_uid, pw.pw_gid)
+except Exception as e:
+    print('WARNING: Could not restore ownership: ' + str(e))
 os.replace(tmp, path)
-print("alert_state.json updated: pending_email=True")
-PYEOF
+print('alert_state.json updated: pending_email=True')
+" 2>&1 | tee -a "${LOG_FILE}"
 else
     log "Inside cooldown (${age}s < ${COOLDOWN}s) — suppressing email."
 fi
