@@ -11,8 +11,6 @@ Key behaviors:
   - Email queue: in-memory, up to 100 items; retried every 5 minutes until sent.
   - 60-minute cooldown per alert type prevents email flooding.
   - [ALERT] prefix for actionable alerts; [STATUS] prefix for informational emails (SYSTEM_BOOT, CHECKIN).
-  - email_alive ping fires after each successful send to verify SMTP health independently.
-  - Sensor freeze detection: buzzer triggers if IPC monotonic clock stops advancing.
   - DB corruption flag (/run/iceboxhero/db_corrupted.flag): consumed once and converted to an email.
   - Monthly checkin email: persists last send time in /data/config/alert_state.json
     to survive reboots. Confirms email pipeline is working during long silent periods.
@@ -65,9 +63,7 @@ STALE_THRESHOLD_SECONDS  = config.getint('alerts', 'stale_timeout')
 SILENCE_DURATION_SECONDS = config.getint('alerts', 'silence_duration')
 EMAIL_COOLDOWN_SECONDS   = config.getint('alerts', 'email_cooldown')
 NTP_SYNC_YEAR            = config.getint('system', 'ntp_sync_year')
-FREEZE_THRESHOLD         = config.getint('alerts', 'sensor_freeze_seconds')
 CHECKIN_INTERVAL_DAYS    = config.getint('alerts', 'checkin_interval_days')
-EMAIL_ALIVE_URL          = config.get('network', 'email_alive_url', fallback='')
 MAX_EMAIL_QUEUE          = 100
 
 # ---------------------------------------------------------------------------
@@ -106,7 +102,6 @@ critical_read_counts    = {}  # {"sensor_name": consecutive_critical_count}
 sensor_failed_state     = {}  # {"sensor_name": bool} — True while sensor is reporting None
 sensor_warning_state    = {}  # {"sensor_name": bool} — True while sensor is in warning zone
 sensor_none_counts      = {}  # {"sensor_name": int} — consecutive None read count
-last_freeze_email       = 0
 
 
 # ---------------------------------------------------------------------------
@@ -181,57 +176,63 @@ def queue_email(alert_type, sensor_name, current_temp, ignore_cooldown=False, st
             print(f"WARNING: Email queue full ({MAX_EMAIL_QUEUE}), dropping: {subject}")
 
 
+def _ping_email_alive():
+    """Ping the email dead-man snitch to confirm the email pipeline is working.
+    Called once on boot and once per checkin interval — not after every send."""
+    email_alive_url = config.get('network', 'email_alive_url', fallback='')
+    if email_alive_url:
+        try:
+            urllib.request.urlopen(email_alive_url, timeout=5)
+        except Exception:
+            pass  # Ping failure is non-fatal
+
+
 def process_email_queue():
     """Background thread: sends queued emails every 5 minutes via SMTP SSL."""
     wait_for_ntp_sync()
 
-    # Fire the appropriate boot notification once NTP is confirmed.
-    # BOOT_FLAG prevents duplicate emails if the service restarts mid-boot.
-    BOOT_FLAG = "/run/iceboxhero/boot_email_sent"
-    if not os.path.exists(BOOT_FLAG):
+    # Fire the boot notification once NTP is confirmed.
+    queue_email("SYSTEM_BOOT", "Monitor", "System Online",
+                ignore_cooldown=True, status_email=True)
+    # Ping email dead-man snitch on boot to confirm pipeline is alive
+    _ping_email_alive()
+
+    # --- Monthly checkin email ---
+    # Fires once per checkin_interval_days to confirm email pipeline is working.
+    # Uses alert_state.json to persist last send time across reboots.
+    ALERT_STATE_FILE = "/data/config/alert_state.json"
+    last_checkin = 0.0
+    try:
+        with open(ALERT_STATE_FILE, 'r') as f:
+            state = json.load(f)
+        if isinstance(state, dict):
+            last_checkin = state.get("last_checkin_email", 0.0)
+    except Exception:
+        pass
+
+    checkin_interval_seconds = CHECKIN_INTERVAL_DAYS * 86400
+    if (time.time() - last_checkin) >= checkin_interval_seconds:
         try:
-            open(BOOT_FLAG, 'w').close()
-        except OSError:
-            pass
-
-        queue_email("SYSTEM_BOOT", "Monitor", "System Online",
-                    ignore_cooldown=True, status_email=True)
-
-        # --- Monthly checkin email ---
-        # Fires once per checkin_interval_days to confirm email pipeline is working.
-        # Uses alert_state.json to persist last send time across reboots.
-        ALERT_STATE_FILE = "/data/config/alert_state.json"
-        last_checkin = 0.0
-        try:
-            with open(ALERT_STATE_FILE, 'r') as f:
-                state = json.load(f)
-            if isinstance(state, dict):
-                last_checkin = state.get("last_checkin_email", 0.0)
-        except Exception:
-            pass
-
-        checkin_interval_seconds = CHECKIN_INTERVAL_DAYS * 86400
-        if (time.time() - last_checkin) >= checkin_interval_seconds:
+            state = {}
             try:
-                state = {}
-                try:
-                    with open(ALERT_STATE_FILE, 'r') as f:
-                        state = json.load(f)
-                    if not isinstance(state, dict):
-                        state = {}
-                except Exception:
-                    pass
-                state["last_checkin_email"] = time.time()
-                tmp = ALERT_STATE_FILE + ".tmp"
-                with open(tmp, 'w') as f:
-                    json.dump(state, f)
-                os.replace(tmp, ALERT_STATE_FILE)
-            except Exception as e:
-                print(f"WARNING: Failed to update checkin timestamp: {e}")
-            queue_email("CHECKIN", "System",
-                        f"IceboxHero is running normally. Next checkin in {CHECKIN_INTERVAL_DAYS} days.",
-                        ignore_cooldown=True, status_email=True)
-            print(f"Queued {CHECKIN_INTERVAL_DAYS}-day checkin email.")
+                with open(ALERT_STATE_FILE, 'r') as f:
+                    state = json.load(f)
+                if not isinstance(state, dict):
+                    state = {}
+            except Exception:
+                pass
+            state["last_checkin_email"] = time.time()
+            tmp = ALERT_STATE_FILE + ".tmp"
+            with open(tmp, 'w') as f:
+                json.dump(state, f)
+            os.replace(tmp, ALERT_STATE_FILE)
+        except Exception as e:
+            print(f"WARNING: Failed to update checkin timestamp: {e}")
+        queue_email("CHECKIN", "System",
+                    f"IceboxHero is running normally. Next checkin in {CHECKIN_INTERVAL_DAYS} days.",
+                    ignore_cooldown=True, status_email=True)
+        print(f"Queued {CHECKIN_INTERVAL_DAYS}-day checkin email.")
+        _ping_email_alive()
 
     smtp_server_addr = config.get('email', 'smtp_server')
     smtp_port        = config.getint('email', 'smtp_port')
@@ -265,11 +266,6 @@ def process_email_queue():
                         try:
                             server.send_message(msg)
                             print(f"Sent: {item['subject']}")
-                            if EMAIL_ALIVE_URL:
-                                try:
-                                    urllib.request.urlopen(EMAIL_ALIVE_URL, timeout=5)
-                                except Exception:
-                                    pass  # Ping failure must never break the email loop
                         except Exception as e:
                             print(f"Failed to send '{item['subject']}': {e}")
                             failed_items.append(item)
@@ -311,7 +307,6 @@ def wait_for_ntp_sync():
 # ---------------------------------------------------------------------------
 
 def main():
-    global last_freeze_email
     print("Starting Hardware Alert & Email Service...")
 
     temp_warning  = config.getfloat('sampling', 'temp_warning')
@@ -355,17 +350,6 @@ def main():
                 else:
                     sensor_data   = payload.get("sensors", {})
                     ipc_timestamp = payload.get("timestamp", 0)
-                    ipc_monotonic = payload.get("monotonic", None)
-
-                    # Sensor service freeze detection
-                    if ipc_monotonic is not None:
-                        delta = time.monotonic() - ipc_monotonic
-                        if delta > FREEZE_THRESHOLD:
-                            trigger_buzzer = True
-                            if (time.monotonic() - last_freeze_email) > EMAIL_COOLDOWN_SECONDS:
-                                queue_email("SYSTEM_FREEZE", "Sensor Service", "No updates detected")
-                                last_freeze_email = time.monotonic()
-
                     is_new_read = (ipc_timestamp != last_ipc_timestamp)
                     if is_new_read:
                         last_ipc_timestamp = ipc_timestamp
