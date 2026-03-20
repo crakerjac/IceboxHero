@@ -9,7 +9,8 @@ A self-contained, fault-tolerant freezer temperature monitoring system built on 
 ## Features
 
 - Continuous DS18B20 temperature monitoring via 1-Wire bus
-- Local ST7735S LCD display with color-coded status and 1 Hz critical flashing
+- Per-sensor configurable temperature thresholds — each freezer has its own warning and critical levels
+- Local ST7735S LCD display with per-sensor color-coded status and 1 Hz critical flashing
 - Piezo buzzer alarm with hardware silence button
 - Email alerts (Gmail/SMTP) with in-memory retry queue — survives network outages
 - External uptime monitoring via [healthchecks.io](https://healthchecks.io) dead-man's snitch
@@ -17,7 +18,7 @@ A self-contained, fault-tolerant freezer temperature monitoring system built on 
 - Read-only root filesystem — SD card protected against power-loss corruption
 - Hardware watchdog forces a reboot if the sensor service hangs
 - Flask web dashboard with 24-hour temperature graph, served entirely from local storage
-- All behavior tunable via a single `config.ini` — no code changes required
+- All behavior tunable via `config.ini` — no code changes required
 
 ---
 
@@ -40,12 +41,11 @@ A self-contained, fault-tolerant freezer temperature monitoring system built on 
 | Silence Button | GPIO27 | Pin 13 |
 | LCD DC | GPIO24 | Pin 18 |
 | LCD RST | GPIO25 | Pin 22 |
-| LCD BLK (backlight) | GPIO18 | Pin 12 |
 | SPI MOSI (LCD SDA) | GPIO10 | Pin 19 |
 | SPI CLK (LCD SCL) | GPIO11 | Pin 23 |
 | SPI CE0 (LCD CS) | GPIO8 | Pin 24 |
 
-> **Note on display labels:** Chinese ST7735 modules label SPI MOSI as `SDA` and SPI CLK as `SCL`. This is a mislabeling — it is SPI, not I2C. Wire SDA→GPIO10 and SCL→GPIO11. The `BLK` pin controls the backlight; wire it to GPIO18 for software control or to 3.3V for always-on.
+> **Note on display labels:** Chinese ST7735 modules label SPI MOSI as `SDA` and SPI CLK as `SCL`. This is a mislabeling — it is SPI, not I2C. Wire SDA→GPIO10 and SCL→GPIO11. Wire the `BLK` (backlight) pin directly to 3.3V for always-on operation, or leave it disconnected if the module has an internal pull-up.
 
 All pins are configurable in `config.ini`.
 
@@ -53,7 +53,7 @@ All pins are configurable in `config.ini`.
 
 ## System Architecture
 
-Eight modules make up the full system. Module 0 (`config_helper.py`) is a shared library imported by all services — it is not a running process. Module 1 covers the OS layer: systemd units, tmpfiles.d, watchdog config, and the data mount. Modules 2–6 are independent long-running services that communicate exclusively through shared files on the RAM disk (`/run`). No service calls another directly — a crash in any single service does not affect the others. systemd restarts each service independently.
+Seven modules make up the full system. Module 0 (`config_helper.py`) is a shared library imported by all services — it is not a running process. Module 1 covers the OS layer: systemd units, tmpfiles.d, watchdog config, and the data mount. Modules 2–6 are independent long-running services that communicate exclusively through shared files on the RAM disk (`/run`). No service calls another directly — a crash in any single service does not affect the others. systemd restarts each service independently.
 
 <p align="center"><img src="docs/architecture-overview.png" alt="System Architecture Diagram"></p>
 
@@ -63,14 +63,13 @@ Eight modules make up the full system. Module 0 (`config_helper.py`) is a shared
 
 | Module | File(s) | Role |
 |---|---|---|
-| 0 — Configuration | `config_helper.py`, `config.ini` | Shared config parser; all tunable parameters |
+| 0 — Configuration | `config_helper.py`, `config.ini` | Shared config parser, sensor config, and JSON utility |
 | 1 — OS & Services | `systemd/*.service`, `watchdog.conf` | Filesystem layout, watchdog, systemd units |
 | 2 — Sensor Acquisition | `sensor_service.py` | DS18B20 1-Wire reads; atomic IPC file writer |
-| 3 — Display | `display_service.py` | ST7735S LCD driver; color-coded status rendering |
-| 4 — Alerts & Email | `alert_service.py` | Buzzer control, GPIO interrupt, SMTP retry queue |
-| 5 — Database Logger | `db_logger.py` | RAM SQLite DB; 4-hour SD backup; automatic pruning on each backup cycle |
+| 3 — Display | `display_service.py` | ST7735S LCD driver; per-sensor color-coded status |
+| 4 — Alerts & Email | `alert_service.py` | Buzzer control, GPIO silence button, SMTP retry queue |
+| 5 — Database Logger | `db_logger.py` | RAM SQLite DB; 4-hour SD backup; automatic pruning |
 | 6 — Web Server | `web_server.py`, `templates/index.html` | Flask REST API; 24-hour graph dashboard |
-
 
 ---
 
@@ -80,9 +79,9 @@ Three storage areas with distinct access patterns:
 
 | Path | Type | Purpose |
 |---|---|---|
-| `/opt/iceboxhero/` | Read-Only (overlay) | All Python source code |
+| `/opt/iceboxhero/` | Read-Only (overlay) | All Python source code and templates |
 | `/run/` | RAM (tmpfs) | IPC state file; live SQLite database |
-| `/data/` | Read-Write (ext4) | SD backup of SQLite; config; maintenance logs |
+| `/data/` | Read-Write (ext4) | SD backup of SQLite; config; alert state |
 
 **SD card writes under normal operation:**
 - One full database backup every 4 hours (configurable)
@@ -96,15 +95,17 @@ The live database resides entirely in RAM (`/run/icebox_db/freezer_monitor.db`).
 
 ### Temperature State Machine
 
+Each sensor is evaluated independently against its own configured thresholds. The display shows each sensor in its own state color simultaneously.
+
 | State | Condition | LCD | Buzzer | Email |
 |---|---|---|---|---|
-| Normal | < 10 °F | White on Black | Off | — |
-| Warning | ≥ 10 °F | Black on Yellow | Off | Yes (60-min cooldown) |
-| Critical | ≥ 15 °F, 2 consecutive reads | Flashing White/Red @ 1 Hz | On | Yes (60-min cooldown) |
-| Missing Sensor | Read timeout or failure | `--.-F`, flashing red | On | Yes |
+| Normal | Below warning threshold | White on Black | Off | — |
+| Warning | ≥ warning threshold | Black on Yellow | Off | Yes (60-min cooldown) |
+| Critical | ≥ critical threshold, 2 consecutive reads | Flashing White/Red @ 1 Hz | On | Yes (60-min cooldown) |
+| Missing Sensor | 3 consecutive None reads | `--.-F`, flashing red | On | Yes |
 | Stale Data | IPC file > 10 min old | `STALE DATA`, flashing | On | Yes |
 
-All thresholds are configurable in `config.ini`.
+Default thresholds (configurable per sensor in `config.ini`): warning = 10°F, critical = 15°F.
 
 > **Note:** The hardware watchdog reboots the Pi after 180 seconds of stale IPC data — well before the 10-minute STALE DATA display threshold is reached. The STALE DATA state is a second line of defence for the unlikely scenario where the watchdog daemon itself fails.
 
@@ -112,12 +113,12 @@ All thresholds are configurable in `config.ini`.
 
 Emails arrive with one of two subject prefixes to support inbox filtering:
 
-- **`[ALERT]`** — Requires immediate attention. Covers: CRITICAL, WARNING, FAILURE, SYSTEM_FREEZE, SYSTEM_ERROR.
+- **`[ALERT]`** — Requires immediate attention. Covers: CRITICAL, WARNING, FAILURE, SYSTEM_ERROR.
 - **`[STATUS]`** — Informational only. Covers: SYSTEM_BOOT, CHECKIN.
 
 **Recommended Gmail filter:** Subject contains `[STATUS] IceboxHero` → Skip Inbox, Mark as read, Apply label.
 
-The email thread runs independently of the buzzer. If the network is down at alert time, the email is queued in memory and retried every 5 minutes until it succeeds.
+The email thread runs independently of the buzzer. If the network is down at alert time, the email is queued in memory and retried every 5 minutes until it succeeds. A periodic checkin email (default: every 30 days) confirms the email pipeline is working during long quiet periods.
 
 ### Silence Button
 
@@ -125,14 +126,14 @@ Pressing the button silences the buzzer for 1 hour. The alarm condition continue
 
 ### Hardware Watchdog
 
-The Linux hardware watchdog monitors `/run/telemetry_state.json` for changes. If `sensor_service.py` fails to update the file for 180 consecutive seconds, the watchdog forces a full hardware reboot. systemd restarts all services automatically on reboot. The 180-second window accommodates the 60-second polling interval plus sensor conversion time and scheduler jitter.
+The Linux hardware watchdog monitors `/run/iceboxhero/telemetry_state.json` for changes. If `sensor_service.py` fails to update the file for 180 consecutive seconds, the watchdog forces a full hardware reboot. systemd restarts all services automatically on reboot. The 180-second window accommodates the 60-second polling interval plus sensor conversion time and scheduler jitter.
 
 ### External Health Monitoring (healthchecks.io)
 
 Two independent UUIDs provide visibility into different failure modes:
 
 - **System-alive ping** — Fired after every successful database write (every 5 min). Grace: 15 min. Detects Pi death, power loss, or DB loop crash.
-- **Email-alive ping** — Fired after every successful email send. Grace: 25 hours. Detects Gmail credential expiration or SMTP API changes — independent of whether your own inbox is working.
+- **Email-alive ping** — Fired on boot and on each periodic checkin. Grace: 35 days. Detects Gmail credential expiration or SMTP configuration issues.
 
 Both URLs are optional. Leave them as the placeholder value in `config.ini` to disable.
 
@@ -171,148 +172,114 @@ At the `fdisk` prompt:
 ```
 Command: n          # new partition
 Type:    p          # primary
-Number:  3          # partition number
-First sector:       # press Enter to accept default (first available sector)
-Last sector:        # press Enter to accept default (rest of the drive)
+Number:  3          # partition 3
+First:   (press Enter — accept default)
+Last:    (press Enter — use remaining space)
 Command: w          # write and exit
 ```
 
-Format, mount, and set permissions:
+Then format and mount:
 
 ```bash
 sudo mkfs.ext4 /dev/mmcblk0p3
 sudo mkdir -p /data/config /data/db /data/logs
-```
-
-Add to `/etc/fstab` so it mounts automatically on every boot:
-```
-/dev/mmcblk0p3  /data  ext4  defaults,noatime  0  2
-```
-
-```bash
-sudo mount -a
+sudo mount /dev/mmcblk0p3 /data
 sudo chown -R pi:pi /data
 ```
 
-Verify: `mountpoint /data` should print `/data is a mountpoint`.
+> Do **not** add `/data` to `/etc/fstab`. `setup.sh` installs a systemd `data.mount` unit that handles mounting correctly and bypasses the overlay filesystem.
 
-### Step 2 — Clone and run setup
+### Step 2 — Clone and Run Setup
 
 ```bash
-git clone git@github.com:crakerjac/IceboxHero.git
-cd IceboxHero
+git clone https://github.com/crakerjac/IceboxHero.git /data/IceboxHero
+cd /data/IceboxHero
 sudo ./setup.sh
 ```
 
-`setup.sh` handles everything else automatically:
+`setup.sh` handles everything automatically:
+- Configures hardware overlays (watchdog, SPI, 1-Wire) in `/boot/firmware/config.txt`
+- Installs system packages and Python dependencies
+- Deploys source code to `/opt/iceboxhero/`
+- Installs and enables all systemd services
+- Configures the hardware watchdog
+- Disables cloud-init (not needed on a local Pi deployment)
 
-- Hardware interfaces (`/boot/firmware/config.txt` — watchdog, SPI, 1-Wire)
-- System packages and Python dependencies
-- Source code deployment to `/opt/iceboxhero/`
-- Chart.js download for the local dashboard
-- Watchdog daemon configuration
-- logrotate configuration
-- All five systemd services (installed and enabled)
-- Weekly CRON job for database maintenance
-
-### Step 3 — Edit config.ini
-
-The script copies the template and then stops so you can fill in your values:
+### Step 3 — Configure
 
 ```bash
 sudo nano /data/config/config.ini
 ```
 
-Required changes:
+**Required:** Set your sensor ROM IDs, Gmail address, and Gmail App Password.
 
-- `[sensors]` — Replace placeholder ROM IDs with your actual DS18B20 addresses. **Reboot first** so the 1-Wire overlay loads, then find them at `/sys/bus/w1/devices/`. Look for entries starting with `28-`.
-- `[email]` — Your Gmail address and [App Password](https://myaccount.google.com/apppasswords) (required if 2FA is enabled).
-- `[network]` — Your two healthchecks.io ping URLs, or leave as placeholders to disable.
+The new per-sensor config format — one `[sensor N]` section per physical sensor:
 
-> `config.ini` is excluded from git via `.gitignore`. Your live file with real credentials stays on the Pi and will never be accidentally committed.
+```ini
+[sensor 1]
+id = 28-00000071c774
+name = Big Freezer
+warning = 10.0
+critical = 15.0
 
-> **ST7735S Display Note:** Identify your panel variant by the colored tab on the flex cable ribbon where it meets the PCB, and wire the driver stub in `display_service.py` accordingly:
->
-> | Tab Color | Constructor |
-> |---|---|
-> | Red | `st7735.ST7735R(spi, ...)` |
-> | Black | `st7735.ST7735R(spi, ..., bgr=True)` |
-> | Green | `st7735.ST7735R(spi, ..., bgr=True)` + possible x/y offsets |
-> | 0.96" 80×160 | Add `width=80, height=160, x_offset=26, y_offset=1` |
->
-> After wiring, flash a solid red frame. If it renders as blue, add `bgr=True`.
+[sensor 2]
+id = 28-0000007005ed
+name = Small Freezer
+warning = 5.0
+critical = 10.0
+```
 
-### Step 4 — Reboot, then start services
+Find your sensor ROM IDs after reboot:
+```bash
+ls /sys/bus/w1/devices/28-*/
+```
+
+**Optional:** Configure healthchecks.io UUIDs in `[network]` for external monitoring. Leave as placeholders to disable.
+
+### Step 4 — Reboot and Start
 
 ```bash
 sudo reboot
+# After reboot:
+sudo /opt/iceboxhero/start_services.sh
 ```
 
-After reboot, connect your sensors if not already done, then:
-```bash
-sudo ./start_services.sh
-```
+`start_services.sh` confirms sensors are detected and config is valid before starting anything.
 
-This confirms sensors are detected, starts all five services, then arms the watchdog last. The script prints a live status summary — all five services and the watchdog should show as active (green) before proceeding.
+### Step 5 — Enable Read-Only Overlay (Production)
 
-### Step 5 — Enable read-only root filesystem (last)
-
-Only after everything is verified working:
+Once everything is working correctly:
 
 ```bash
 sudo raspi-config
 # Performance Options → Overlay File System → Enable
 ```
 
-The `/data` partition bypasses the overlay and remains writable. The root partition becomes read-only, protecting the OS from SD card corruption on sudden power loss. Do this step last — it is difficult to make further system changes once enabled.
+**Do this last.** Once enabled, any changes to the root filesystem require temporarily disabling the overlay. All permanent config lives on `/data/` which is always read-write.
 
 ---
 
-## Web Dashboard
+## Sensor Configuration
 
-Once services are running, the dashboard is accessible from any browser on your local network.
+Each sensor gets its own `[sensor N]` section in `config.ini`. Thresholds are per-sensor — different freezers can have different warning and critical levels:
 
-### Finding Your Pi's Address
-
-The easiest way is by hostname — Raspberry Pi OS advertises itself via mDNS by default:
-
-```
-http://iceboxhero.local:8080
-```
-
-If that doesn't resolve (some Windows networks block mDNS), find the IP address directly on the Pi:
-
-```bash
-hostname -I
+```ini
+[sensor 1]
+id = 28-xxxxxxxxxxxx    # ROM ID from /sys/bus/w1/devices/
+name = Big Freezer      # Display name — shown on LCD and web dashboard
+warning = 10.0          # °F — steady yellow on display, email alert
+critical = 15.0         # °F — flashing red on display, buzzer, email alert
 ```
 
-Then navigate to `http://<ip-address>:8080` from any device on the same network.
-
-The port is configurable in `config.ini` under `[network] → web_port`.
-
-### What the Dashboard Shows
-
-- **Current temperatures** — one card per sensor, color-coded to match the physical display (green = normal, yellow = warning, red = critical). Updates every 30 seconds from the RAM disk IPC file.
-- **24-hour history graph** — line chart per sensor, pulled directly from the SQLite database. Refreshes every 5 minutes to match the database commit interval.
-
-### Notes
-
-- The dashboard is **read-only** — there are no controls, only monitoring.
-- Chart.js is served locally from `/opt/iceboxhero/static/chart.min.js` — the dashboard loads instantly and works fully during an internet outage.
-- Timestamps on the graph are stored in UTC in SQLite and converted to your browser's local timezone automatically for display.
-- The dashboard is served on all network interfaces (`0.0.0.0`). It is intended for use on a trusted private network only — there is no authentication.
+If `warning` or `critical` are omitted from a sensor section, the global defaults from `[sampling]` are used as fallback.
 
 ---
 
-## Operations
-
-### Starting and Stopping Services
-
-Two helper scripts manage the service lifecycle. The critical rule is that the **watchdog must always be stopped before the IceboxHero services** — stopping a service without stopping the watchdog first means the IPC file stops updating, and the watchdog will force a hardware reboot 180 seconds later.
+## Starting and Stopping Services
 
 ```bash
-sudo ./stop_services.sh     # watchdog first, then all five services
-sudo ./start_services.sh    # all five services, then watchdog last
+sudo /opt/iceboxhero/stop_services.sh     # watchdog first, then all services
+sudo /opt/iceboxhero/start_services.sh    # all services, then watchdog last
 ```
 
 `start_services.sh` includes two preflight checks before starting anything:
@@ -320,16 +287,14 @@ sudo ./start_services.sh    # all five services, then watchdog last
 - Confirms at least one DS18B20 sensor is visible on the 1-Wire bus at `/sys/bus/w1/devices/28-*`
 - Confirms `config.ini` no longer contains the placeholder sensor ROM IDs
 
-If either check fails it warns you and prompts before continuing. It also waits 5 seconds after starting the IceboxHero services before starting the watchdog, giving `sensor_service` time to write the initial IPC file.
-
 ### Working Without Sensors Connected (Setup and Maintenance Mode)
 
 Any time you need to work on the system without sensors physically connected — editing config, redeploying code, running `uninstall.sh` — stop services first:
 
 ```bash
-sudo ./stop_services.sh
+sudo /opt/iceboxhero/stop_services.sh
 # do your work
-sudo ./start_services.sh    # when sensors are reconnected and ready
+sudo /opt/iceboxhero/start_services.sh    # when sensors are reconnected and ready
 ```
 
 ### Testing the Setup Script
@@ -337,7 +302,7 @@ sudo ./start_services.sh    # when sensors are reconnected and ready
 To re-run `setup.sh` from a clean state without reimaging the SD card:
 
 ```bash
-sudo ./stop_services.sh
+sudo /opt/iceboxhero/stop_services.sh
 sudo ./uninstall.sh
 sudo ./setup.sh
 ```
@@ -372,8 +337,6 @@ python3 mock_sensors.py --mode ramp --interval 1
 python3 mock_sensors.py --mode sine --interval 5
 ```
 
-Note that `--interval` only controls how fast the mock writes the IPC file. The downstream services (`display_service`, `alert_service`, `db_logger`) still run on their own timers — `db_logger` won't commit faster than `db_commit_interval` regardless.
-
 ### Modes
 
 | Mode | What it does |
@@ -382,12 +345,12 @@ Note that `--interval` only controls how fast the mock writes the IPC file. The 
 | `normal` | Steady 8°F below warning threshold |
 | `warning` | Steady 1°F above warning threshold |
 | `critical` | Steady 2°F above critical threshold — triggers buzzer and email after 2 reads |
-| `missing` | First sensor returns `None` — triggers FAILURE alert and buzzer |
+| `missing` | First sensor returns `None` — triggers FAILURE alert after 3 consecutive reads |
 | `ramp` | Ramps up 1°F per poll cycle, wraps at critical+5 — good for watching state transitions |
 
 ### What You Can Test
 
-- **Display** — correct colors, 1 Hz flash at CRITICAL, font sizing, STALE DATA overlay
+- **Display** — per-sensor colors, 1 Hz flash at CRITICAL, font sizing, STALE DATA overlay
 - **Alerts** — buzzer fires at correct threshold, silence button mutes it, re-arms after 1 hour
 - **Email** — CRITICAL and WARNING emails arrive, cooldown prevents flooding, SYSTEM_BOOT on start
 - **Web dashboard** — current readings update every 30s, 24-hour graph populates over time
@@ -402,7 +365,7 @@ Stop the mock with `Ctrl+C`. The IPC file is left in place so downstream service
 
 Chinese ST7735 modules often ship with no documentation. `display_test.py` cycles through known configurations and pushes test patterns so you can visually confirm which variant you have. On success it writes the working parameters directly to `config.ini`.
 
-> **Wiring note:** The `SDA` and `SCL` labels on these modules are SPI, not I2C. Wire `SDA → GPIO10` (MOSI) and `SCL → GPIO11` (CLK). The `BLK` pin controls the backlight — wire to GPIO18 for software control or to 3.3V for always-on, and set `lcd_bl_pin` in `config.ini` accordingly.
+> **Wiring note:** The `SDA` and `SCL` labels on these modules are SPI, not I2C. Wire `SDA → GPIO10` (MOSI) and `SCL → GPIO11` (CLK). Wire `BLK` directly to 3.3V for always-on backlight, or leave disconnected if the module has an internal pull-up. Wire `RST → GPIO25`.
 
 ```bash
 # List all candidates without touching hardware
@@ -431,7 +394,7 @@ journalctl -u icebox-alert.service -b     # current boot only
 journalctl -u icebox-db.service -n 50     # last 50 lines
 
 # Check current sensor readings
-cat /run/telemetry_state.json
+cat /run/iceboxhero/telemetry_state.json
 
 # Check RAM disk usage
 df -h /run
@@ -445,7 +408,7 @@ systemctl status 'icebox-*'
 ## Repository Structure
 
 ```
-iceboxhero/
+IceboxHero/
 ├── README.md
 ├── LICENSE
 ├── .gitignore
@@ -453,21 +416,24 @@ iceboxhero/
 ├── uninstall.sh                 # Reverses setup.sh — for testing and reinstallation
 ├── start_services.sh            # Starts all services and the watchdog
 ├── stop_services.sh             # Stops watchdog first, then all services
+├── update.sh                    # Updates deployed code with minimal downtime
 ├── config.ini.template          # Configuration template — copy to /data/config/config.ini
-├── config_helper.py             # Shared config parser          (Module 0)
-├── sensor_service.py            # DS18B20 acquisition service   (Module 2)
-├── display_service.py           # ST7735S LCD display service   (Module 3)
-├── alert_service.py             # Buzzer, button, email alerts  (Module 4)
-├── db_logger.py                 # RAM SQLite DB + SD backup     (Module 5)
-├── web_server.py                # Flask API and dashboard       (Module 6)
+├── config_helper.py             # Shared config parser, sensor config  (Module 0)
+├── sensor_service.py            # DS18B20 acquisition service          (Module 2)
+├── display_service.py           # ST7735S LCD display service          (Module 3)
+├── alert_service.py             # Buzzer, button, email alerts         (Module 4)
+├── db_logger.py                 # RAM SQLite DB + SD backup            (Module 5)
+├── web_server.py                # Flask API and dashboard              (Module 6)
 ├── mock_sensors.py              # Dev tool — simulates sensors without hardware
 ├── display_test.py              # Dev tool — identifies display variant, writes config
 ├── templates/
 │   └── index.html               # Web dashboard UI
 ├── static/
-│   └── favicon.png              # Browser tab icon (burning freezer)
+│   ├── favicon.png              # Browser tab icon
+│   ├── color_logo.png           # Project logo
+│   └── splash.jpg               # Boot splash screen
 ├── docs/
-│   ├── architecture-overview.png  # Simple data flow diagram — displayed in README
+│   ├── architecture-overview.png  # Data flow diagram — displayed in README
 │   ├── architecture-full.png      # Full module diagram — displayed in ARCHITECTURE.md
 │   └── ARCHITECTURE.md            # Full design notes, runtime paths, watchdog detail
 └── systemd/
@@ -475,7 +441,8 @@ iceboxhero/
     ├── icebox-display.service
     ├── icebox-alert.service
     ├── icebox-db.service
-    └── icebox-web.service
+    ├── icebox-web.service
+    └── icebox-watchdog.service
 ```
 
 ---

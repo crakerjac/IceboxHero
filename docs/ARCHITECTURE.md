@@ -20,9 +20,9 @@ running normally. systemd restarts the crashed module independently.
 
 ### RAM-first storage
 The live SQLite database lives entirely in `/run/icebox_db/` (tmpfs). SD card writes
-are limited to one backup every 4 hours and a weekly maintenance log. The root
-filesystem runs read-only under raspi-config's overlay filesystem. This eliminates
-SD card corruption from power loss and extends card lifespan to the practical maximum.
+are limited to one backup every 4 hours. The root filesystem runs read-only under
+raspi-config's overlay filesystem. This eliminates SD card corruption from power loss
+and extends card lifespan to the practical maximum.
 
 ### Hardware watchdog as last resort
 `/usr/sbin/watchdog` monitors `telemetry_state.json` for changes. If `sensor_service`
@@ -30,6 +30,11 @@ fails to update the file for 180 consecutive seconds, the watchdog writes to
 `/dev/watchdog0` which triggers a full hardware reboot — independent of the OS,
 systemd, or any Python process. The 180s window = 60s poll interval + conversion
 time + scheduler jitter + 2x safety margin.
+
+### Per-sensor thresholds
+Each sensor has independently configurable warning and critical thresholds in
+`config.ini`. The display renders each sensor's half of the screen in its own
+state color. The buzzer fires if any sensor is in a critical or failure state.
 
 ### Fault isolation
 ```
@@ -55,13 +60,13 @@ healthchecks.io heartbeat stops, triggering a dead-man email after its grace per
 | `/run/iceboxhero/telemetry_state.json` | tmpfs | IPC state file — pre-created by tmpfiles.d at boot |
 | `/run/iceboxhero/telemetry_state.tmp` | tmpfs | Atomic write temp (sensor_service only) |
 | `/run/iceboxhero/db_corrupted.flag` | tmpfs | DB corruption signal to alert_service |
-| `/run/iceboxhero/boot_email_sent` | tmpfs | Flag to prevent duplicate boot emails |
 | `/run/icebox_db/freezer_monitor.db` | tmpfs | Live SQLite database |
 | `/data/config/config.ini` | ext4 | Working config (never committed to git) |
+| `/data/config/alert_state.json` | ext4 | Persistent alert state (checkin email timestamp) |
 | `/data/db/freezer_monitor.db` | ext4 | 4-hour SD card backup of SQLite |
 | `/data/db/last_backup` | ext4 | Timestamp of last successful SD backup |
-| `/data/logs/db_maintenance.log` | ext4 | Weekly CRON log |
 | `/opt/iceboxhero/` | read-only overlay | Deployed Python source code |
+| `/opt/iceboxhero/config.ini.template` | read-only overlay | Default values for config_helper fallback |
 | `/etc/tmpfiles.d/iceboxhero.conf` | root | Creates runtime dirs + IPC file at boot |
 | `/etc/watchdog.conf` | root | Watchdog config (change=180, pidfile) |
 | `/etc/default/watchdog` | root | run_watchdog=1 (required for daemon start) |
@@ -85,7 +90,7 @@ sensor_service begins writing real data every 60s
  │
  ▼
 start_services.sh (or boot) starts icebox-watchdog.service
- │                           (5s after sensor_service)
+ │
  ▼
 /usr/sbin/watchdog -F
  │  reads /etc/watchdog.conf
@@ -99,3 +104,56 @@ start_services.sh (or boot) starts icebox-watchdog.service
 The watchdog daemon is NOT systemd's built-in RuntimeWatchdog — that is explicitly
 disabled via `/etc/systemd/system.conf.d/disable-runtime-watchdog.conf` so systemd
 does not claim `/dev/watchdog0` before our daemon can open it.
+
+If the watchdog fires and the system enters a reboot loop, the healthchecks.io
+system-alive ping will stop firing. After the configured grace period (default: 15 min),
+healthchecks.io sends an alert email independent of the Pi's ability to send email.
+
+---
+
+## Sensor Configuration
+
+Sensors are configured in `config.ini` using numbered `[sensor N]` sections:
+
+```ini
+[sensor 1]
+id = 28-00000071c774    # DS18B20 ROM ID
+name = Big Freezer      # Display name
+warning = 10.0          # °F warning threshold
+critical = 15.0         # °F critical threshold
+
+[sensor 2]
+id = 28-0000007005ed
+name = Small Freezer
+warning = 5.0
+critical = 10.0
+```
+
+`config_helper.get_sensor_configs()` parses all `[sensor N]` sections and returns
+a list of dicts with id, name, warning, and critical keys. Missing warning/critical
+values fall back to the global defaults in `[sampling]`.
+
+---
+
+## Boot Sequence
+
+```
+Power on
+ │
+ ▼
+tmpfiles.d — creates /run/iceboxhero/ and /run/icebox_db/ with correct ownership
+ │           pre-populates telemetry_state.json with boot state
+ ▼
+systemd starts all icebox-*.service units (except watchdog)
+ │
+ ├─► sensor_service  — reads DS18B20 sensors, writes IPC file every 60s
+ ├─► display_service — shows splash screen, waits for first real sensor read
+ ├─► alert_service   — waits for NTP, sends SYSTEM_BOOT email, then monitors
+ ├─► db_logger       — restores DB from SD backup, waits for NTP, logs telemetry
+ └─► web_server      — serves Flask dashboard on port 8080
+ │
+ ▼
+icebox-watchdog.service starts (After=icebox-sensor.service)
+ │
+ └─► /usr/sbin/watchdog -F begins monitoring IPC file
+```
