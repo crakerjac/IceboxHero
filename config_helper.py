@@ -4,6 +4,35 @@ import os
 import time
 
 
+def get_sensor_configs(config):
+    """Parse all [sensor N] sections and return a list of sensor config dicts.
+
+    Each dict contains:
+        id       — DS18B20 ROM ID (e.g. 28-00000071c774)
+        name     — friendly display name (e.g. Big Freezer)
+        warning  — warning threshold in °F (falls back to [sampling] temp_warning)
+        critical — critical threshold in °F (falls back to [sampling] temp_critical)
+
+    Sensors are returned in section order (sensor 1, sensor 2, ...).
+    """
+    global_warning  = config.getfloat('sampling', 'temp_warning')
+    global_critical = config.getfloat('sampling', 'temp_critical')
+
+    sensors = []
+    sensor_sections = sorted(
+        [s for s in config.sections() if s.lower().startswith('sensor ')],
+        key=lambda s: s.lower()
+    )
+    for section in sensor_sections:
+        sensors.append({
+            'id':       config.get(section, 'id').strip(),
+            'name':     config.get(section, 'name').strip(),
+            'warning':  config.getfloat(section, 'warning',  fallback=global_warning),
+            'critical': config.getfloat(section, 'critical', fallback=global_critical),
+        })
+    return sensors
+
+
 def safe_read_json(path, retries=3):
     """Read and parse a JSON file with retries on decode/IO error.
     Shared utility used by alert_service, display_service, and web_server.
@@ -23,8 +52,11 @@ TEMPLATE_PATH = '/opt/iceboxhero/config.ini.template'
 
 # Keys that MUST be explicitly configured — no template default is acceptable.
 REQUIRED = {
-    'email':   ['smtp_user', 'smtp_pass', 'recipient'],
+    'email': ['smtp_user', 'smtp_pass', 'recipient'],
 }
+
+# Placeholder ROM ID patterns — detected and rejected during validation
+ROM_PLACEHOLDERS = ('00000xxxxxxx', '00000yyyyyyy')
 
 
 def load_config(config_path=CONFIG_PATH, template_path=TEMPLATE_PATH):
@@ -119,26 +151,19 @@ def load_config(config_path=CONFIG_PATH, template_path=TEMPLATE_PATH):
                     f"(empty or still set to template placeholder)"
                 )
 
-    # Sensors: must have at least one non-placeholder ROM ID
-    if not config.has_section('sensors') or not config.items('sensors'):
-        errors.append("[sensors] No sensor ROM IDs configured")
+    # Sensor sections: must have at least one valid [sensor N] section
+    sensor_sections = [s for s in config.sections()
+                       if s.lower().startswith('sensor ')]
+    if not sensor_sections:
+        errors.append("No [sensor N] sections found — add at least one sensor configuration")
     else:
-        template_sensor_keys = set(template.options('sensors')) \
-            if template.has_section('sensors') else set()
-        placeholder_roms = [
-            k for k in config.options('sensors')
-            if k in template_sensor_keys
-        ]
-        if placeholder_roms:
-            errors.append(
-                f"[sensors] Placeholder ROM IDs still present: {placeholder_roms}"
-            )
-        real_roms = [
-            k for k in config.options('sensors')
-            if k not in template_sensor_keys
-        ]
-        if not real_roms:
-            errors.append("[sensors] No valid sensor ROM IDs found")
+        for section in sensor_sections:
+            rom_id = config.get(section, 'id', fallback='').strip()
+            name   = config.get(section, 'name', fallback='').strip()
+            if not rom_id or any(p in rom_id for p in ROM_PLACEHOLDERS):
+                errors.append(f"[{section}] id is not configured (placeholder or empty)")
+            if not name:
+                errors.append(f"[{section}] name is required")
 
     if errors:
         raise ValueError(

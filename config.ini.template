@@ -10,13 +10,15 @@
 # listed in .gitignore and will never be committed to the repository.
 
 [system]
-device_id = freezer-pi-01
+device_id = iceboxhero-01
 ntp_sync_year = 2024
 log_level = INFO
 
 [sampling]
 poll_interval = 60
 db_commit_interval = 300
+# Global temperature thresholds — used as fallback if a [sensor N] section
+# does not define its own warning/critical values.
 temp_warning = 10.0
 temp_critical = 15.0
 
@@ -31,12 +33,24 @@ lcd_bl_pin = none
 # 1-Wire bus pin (Requires: dtoverlay=w1-gpio,gpiopin=4 in /boot/firmware/config.txt)
 one_wire_pin = 4
 
-[sensors]
-# Map each sensor's DS18B20 ROM ID to a logical name.
-# Find ROM IDs under /sys/bus/w1/devices/ after wiring with the overlay enabled.
-# Format: ROM_ID = logical_name
-28-00000xxxxxxx = big_freezer
-28-00000yyyyyyy = small_freezer
+# ---------------------------------------------------------------------------
+# Sensor configuration — one [sensor N] section per physical sensor.
+# Find ROM IDs under /sys/bus/w1/devices/ after enabling the 1-Wire overlay.
+# warning/critical are optional — fall back to [sampling] globals if omitted.
+# ---------------------------------------------------------------------------
+
+[sensor 1]
+id = 28-00000xxxxxxx
+name = Big Freezer
+warning = 10.0
+critical = 15.0
+
+# Add more sensors by copying the block above and incrementing the number:
+# [sensor 2]
+# id = 28-00000yyyyyyy
+# name = Small Freezer
+# warning = 10.0
+# critical = 15.0
 
 [display]
 refresh_rate = 0.5
@@ -46,7 +60,7 @@ splash_duration = 60
 # and auto-populate these values.
 width = 128
 height = 160
-rotation = 0
+rotation = 270
 bgr = True
 x_offset = 0
 y_offset = 0

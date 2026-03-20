@@ -2,6 +2,7 @@
 # The live config.ini contains SMTP credentials and healthchecks.io UUIDs.
 # It must NEVER be committed. Use config.ini.example as the repo template.
 config.ini
+*.bak
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

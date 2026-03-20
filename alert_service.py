@@ -25,7 +25,7 @@ import urllib.request
 from email.message import EmailMessage
 from gpiozero import Buzzer
 import RPi.GPIO as _RPIGPIO
-from config_helper import load_config, safe_read_json
+from config_helper import load_config, safe_read_json, get_sensor_configs
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -309,8 +309,10 @@ def wait_for_ntp_sync():
 def main():
     print("Starting Hardware Alert & Email Service...")
 
-    temp_warning  = config.getfloat('sampling', 'temp_warning')
-    temp_critical = config.getfloat('sampling', 'temp_critical')
+    # Build per-sensor threshold lookup: {name: {warning, critical}}
+    sensor_configs   = get_sensor_configs(config)
+    sensor_thresholds = {s['name']: {'warning': s['warning'], 'critical': s['critical']}
+                         for s in sensor_configs}
 
     email_thread = threading.Thread(target=process_email_queue, daemon=True)
     email_thread.start()
@@ -363,6 +365,13 @@ def main():
 
                     # --- Evaluate temperature alerts ---
                     for name, temp in sensor_data.items():
+                        # Look up per-sensor thresholds, fall back to global if unknown
+                        thresholds    = sensor_thresholds.get(name, {})
+                        temp_warning  = thresholds.get('warning',
+                                            config.getfloat('sampling', 'temp_warning'))
+                        temp_critical = thresholds.get('critical',
+                                            config.getfloat('sampling', 'temp_critical'))
+
                         if temp is None:
                             trigger_buzzer = True
                             if is_new_read and first_real_read:
