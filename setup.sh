@@ -273,10 +273,6 @@ install -d -m 755 -o "${REAL_USER}" -g "${REAL_USER}" \
     /opt/iceboxhero/templates \
     /opt/iceboxhero/static
 
-# Watchdog repair script
-install -m 755 -o root -g root "${SCRIPT_DIR}/watchdog_repair.sh" /opt/iceboxhero/watchdog_repair.sh
-success "Deployed: watchdog_repair.sh"
-
 # Python modules
 # Helper scripts
 for f in start_services.sh stop_services.sh update.sh; do
@@ -393,8 +389,6 @@ max-load-1       = 24
 # Trigger a hardware reboot if the sensor service stops updating the IPC file
 file   = /run/iceboxhero/telemetry_state.json
 change = 180
-# Run repair script before rebooting — sets pending email flag in alert_state.json
-repair-binary    = /opt/iceboxhero/watchdog_repair.sh
 EOF
 
 # Do NOT enable or start the watchdog here. The watchdog monitors the IPC
