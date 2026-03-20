@@ -26,7 +26,7 @@ button_pin = 27
 lcd_dc_pin = 24
 lcd_rst_pin = 25
 # Backlight pin — wire BLK to a GPIO for software control, or to 3.3V for always-on.
-# If wired to 3.3V, set lcd_bl_pin = none
+# If wired to 3.3V or no BLK pin present, set lcd_bl_pin = none
 lcd_bl_pin = none
 # 1-Wire bus pin (Requires: dtoverlay=w1-gpio,gpiopin=4 in /boot/firmware/config.txt)
 one_wire_pin = 4
@@ -40,7 +40,8 @@ one_wire_pin = 4
 
 [display]
 refresh_rate = 0.5
-stale_timeout = 600
+# Splash screen duration on boot (seconds). Set to 0 to disable.
+splash_duration = 60
 # Display driver parameters — run display_test.py to identify your display
 # and auto-populate these values.
 width = 128
@@ -51,6 +52,8 @@ x_offset = 0
 y_offset = 0
 
 [alerts]
+# Seconds before IPC file age triggers STALE DATA alert
+stale_timeout = 600
 silence_duration = 3600
 email_cooldown = 3600
 sensor_freeze_seconds = 180

@@ -12,6 +12,13 @@ SD card write strategy:
     the WAL file is truncated to reclaim memory.
   - On boot, the last SD backup is restored into RAM before the main loop starts.
 
+Boot sequence:
+  - verify_and_recover_db() — integrity check on SD backup, quarantine if corrupt
+  - restore_db_from_backup() — load SD backup into RAM (no clock required)
+  - init_db() — create schema in RAM DB (idempotent, no clock required)
+  - wait_for_ntp_sync() — block writes until clock is valid
+  - main loop + backup thread start
+
 Integrity / NTP gates:
   - On boot, PRAGMA integrity_check runs against the SD backup; corruption
     triggers rename-to-.corrupt and sets /run/db_corrupted.flag for alert_service.
@@ -53,6 +60,7 @@ NTP_SYNC_YEAR         = config.getint('system', 'ntp_sync_year')
 
 def backup_ram_db_to_disk():
     """Atomically copies the live RAM database to the SD card, then prunes RAM."""
+    src = None
     try:
         os.makedirs(DB_DIR, exist_ok=True)
         src = sqlite3.connect(RAM_DB_FILE, timeout=10)
@@ -88,31 +96,42 @@ def backup_ram_db_to_disk():
     except Exception as e:
         print(f"WARNING: Disk backup failed (data safe in RAM): {e}")
     finally:
-        try:
-            src.close()
-        except Exception:
-            pass
+        if src is not None:
+            try:
+                src.close()
+            except Exception:
+                pass
 
 
 def restore_db_from_backup():
     """On boot, copies the last SD backup into the RAM database."""
     os.makedirs(RAM_DB_DIR, exist_ok=True)
 
-    if os.path.exists(DB_FILE):
-        print("Restoring database from SD backup into RAM...")
-        try:
-            src = sqlite3.connect(DB_FILE, timeout=10)
-            dst = sqlite3.connect(RAM_DB_FILE, timeout=10)
-            try:
-                src.backup(dst)
-            finally:
-                src.close()
-                dst.close()
-            print("Database restored successfully.")
-        except Exception as e:
-            print(f"Restore failed, starting fresh: {e}")
-    else:
+    if not os.path.exists(DB_FILE):
         print("No SD backup found. Starting with empty database.")
+        return
+
+    print("Restoring database from SD backup into RAM...")
+    src = None
+    dst = None
+    try:
+        src = sqlite3.connect(DB_FILE, timeout=10)
+        dst = sqlite3.connect(RAM_DB_FILE, timeout=10)
+        src.backup(dst)
+        print("Database restored successfully.")
+    except Exception as e:
+        print(f"Restore failed, starting fresh: {e}")
+    finally:
+        if src is not None:
+            try:
+                src.close()
+            except Exception:
+                pass
+        if dst is not None:
+            try:
+                dst.close()
+            except Exception:
+                pass
 
 
 def backup_loop(interval_seconds):
@@ -268,10 +287,12 @@ def main():
     os.makedirs(DB_DIR, exist_ok=True)
     os.makedirs(RAM_DB_DIR, exist_ok=True)
 
-    verify_and_recover_db()      # Check SD backup integrity before restoring
-    restore_db_from_backup()     # Load SD backup into RAM
-    wait_for_ntp_sync()          # Block until clock is valid
-    init_db()                    # Create schema in RAM DB (idempotent)
+    # Boot sequence: integrity check and restore happen before NTP gate so
+    # historical data is available immediately regardless of network state.
+    verify_and_recover_db()
+    restore_db_from_backup()
+    init_db()
+    wait_for_ntp_sync()     # Block writes until clock is valid
 
     backup_interval = config.getint('database', 'backup_interval_hours') * 3600
     backup_thread   = threading.Thread(target=backup_loop, args=(backup_interval,), daemon=True)
