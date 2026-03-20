@@ -181,8 +181,8 @@ phase_prepare() {
 
     # Back up config before any changes
     if [[ -f /data/config/config.ini ]]; then
-        cp /data/config/config.ini /data/config/config.ini.pre-update.save
-        success "Config backed up to /data/config/config.ini.pre-update.save"
+        cp /data/config/config.ini /data/config/config.ini.save
+        success "Config backed up to /data/config/config.ini.save"
     fi
 
     write_state "apply_pending"
