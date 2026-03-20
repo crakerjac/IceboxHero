@@ -196,13 +196,6 @@ def process_email_queue():
     # Ping email dead-man snitch on boot to confirm pipeline is alive
     _ping_email_alive()
 
-    # --- Periodic checkin email ---
-    # Fires every checkin_interval_days during long uptimes with no reboots.
-    # Timer is in-memory — resets on reboot, which is fine since SYSTEM_BOOT
-    # already fires on every boot and serves as the boot-time checkin.
-    checkin_interval_seconds = config.getint('alerts', 'checkin_interval_days') * 86400
-    last_checkin = time.monotonic()
-
     smtp_server_addr = config.get('email', 'smtp_server')
     smtp_port        = config.getint('email', 'smtp_port')
     smtp_user        = config.get('email', 'smtp_user')
@@ -286,8 +279,10 @@ def main():
     email_thread = threading.Thread(target=process_email_queue, daemon=True)
     email_thread.start()
 
-    DB_CORRUPT_FLAG    = "/run/iceboxhero/db_corrupted.flag"
-    last_ipc_timestamp = 0
+    DB_CORRUPT_FLAG          = "/run/iceboxhero/db_corrupted.flag"
+    last_ipc_timestamp       = 0
+    checkin_interval_seconds = config.getint('alerts', 'checkin_interval_days') * 86400
+    last_checkin             = time.monotonic()
     # Grace mode: suppress FAILURE/CRITICAL alerts until the first real sensor
     # read arrives (IPC timestamp > 0 with at least one non-None value).
     # This cleanly handles any boot timing without relying on fixed timers.
