@@ -46,7 +46,7 @@ splash_duration = 60
 # and auto-populate these values.
 width = 128
 height = 160
-rotation = 0
+rotation = 90
 bgr = True
 x_offset = 0
 y_offset = 0
