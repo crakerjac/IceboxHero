@@ -12,8 +12,8 @@ Key behaviors:
   - 60-minute cooldown per alert type prevents email flooding.
   - [ALERT] prefix for actionable alerts; [STATUS] prefix for informational emails (SYSTEM_BOOT, CHECKIN).
   - DB corruption flag (/run/iceboxhero/db_corrupted.flag): consumed once and converted to an email.
-  - Monthly checkin email: persists last send time in /data/config/alert_state.json
-    to survive reboots. Confirms email pipeline is working during long silent periods.
+  - Periodic checkin email: in-memory timer fires every checkin_interval_days during
+    long uptimes. Resets on reboot — SYSTEM_BOOT serves as the boot-time checkin.
 """
 
 import os
@@ -63,7 +63,6 @@ STALE_THRESHOLD_SECONDS  = config.getint('alerts', 'stale_timeout')
 SILENCE_DURATION_SECONDS = config.getint('alerts', 'silence_duration')
 EMAIL_COOLDOWN_SECONDS   = config.getint('alerts', 'email_cooldown')
 NTP_SYNC_YEAR            = config.getint('system', 'ntp_sync_year')
-CHECKIN_INTERVAL_DAYS    = config.getint('alerts', 'checkin_interval_days')
 MAX_EMAIL_QUEUE          = 100
 
 # ---------------------------------------------------------------------------
@@ -197,42 +196,12 @@ def process_email_queue():
     # Ping email dead-man snitch on boot to confirm pipeline is alive
     _ping_email_alive()
 
-    # --- Monthly checkin email ---
-    # Fires once per checkin_interval_days to confirm email pipeline is working.
-    # Uses alert_state.json to persist last send time across reboots.
-    ALERT_STATE_FILE = "/data/config/alert_state.json"
-    last_checkin = 0.0
-    try:
-        with open(ALERT_STATE_FILE, 'r') as f:
-            state = json.load(f)
-        if isinstance(state, dict):
-            last_checkin = state.get("last_checkin_email", 0.0)
-    except Exception:
-        pass
-
-    checkin_interval_seconds = CHECKIN_INTERVAL_DAYS * 86400
-    if (time.time() - last_checkin) >= checkin_interval_seconds:
-        try:
-            state = {}
-            try:
-                with open(ALERT_STATE_FILE, 'r') as f:
-                    state = json.load(f)
-                if not isinstance(state, dict):
-                    state = {}
-            except Exception:
-                pass
-            state["last_checkin_email"] = time.time()
-            tmp = ALERT_STATE_FILE + ".tmp"
-            with open(tmp, 'w') as f:
-                json.dump(state, f)
-            os.replace(tmp, ALERT_STATE_FILE)
-        except Exception as e:
-            print(f"WARNING: Failed to update checkin timestamp: {e}")
-        queue_email("CHECKIN", "System",
-                    f"IceboxHero is running normally. Next checkin in {CHECKIN_INTERVAL_DAYS} days.",
-                    ignore_cooldown=True, status_email=True)
-        print(f"Queued {CHECKIN_INTERVAL_DAYS}-day checkin email.")
-        _ping_email_alive()
+    # --- Periodic checkin email ---
+    # Fires every checkin_interval_days during long uptimes with no reboots.
+    # Timer is in-memory — resets on reboot, which is fine since SYSTEM_BOOT
+    # already fires on every boot and serves as the boot-time checkin.
+    checkin_interval_seconds = config.getint('alerts', 'checkin_interval_days') * 86400
+    last_checkin = time.monotonic()
 
     smtp_server_addr = config.get('email', 'smtp_server')
     smtp_port        = config.getint('email', 'smtp_port')
@@ -327,6 +296,15 @@ def main():
     while True:
         is_stale      = False
         trigger_buzzer = False
+
+        # --- Periodic checkin email ---
+        if (time.monotonic() - last_checkin) >= checkin_interval_seconds:
+            last_checkin = time.monotonic()
+            queue_email("CHECKIN", "System",
+                        f"IceboxHero is running normally.",
+                        ignore_cooldown=True, status_email=True)
+            _ping_email_alive()
+            print("Queued periodic checkin email.")
 
         # --- DB corruption flag ---
         if os.path.exists(DB_CORRUPT_FLAG):
