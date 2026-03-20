@@ -22,7 +22,7 @@ import os
 import time
 import json
 from PIL import Image, ImageDraw, ImageFont
-from config_helper import load_config, safe_read_json
+from config_helper import load_config, safe_read_json, get_sensor_configs
 import board
 import digitalio
 from adafruit_rgb_display import st7735
@@ -129,59 +129,72 @@ def push_to_display(image):
 # State evaluation
 # ---------------------------------------------------------------------------
 
-def evaluate_worst_state(sensor_data, is_stale, temp_warning, temp_critical, critical_counts):
-    """Returns the worst-case display state across all sensors."""
+def evaluate_sensor_states(sensor_data, is_stale, sensor_thresholds, critical_counts):
+    """Returns per-sensor state dict: {sensor_name: "NORMAL"|"WARNING"|"CRITICAL"}
+    Also returns overall worst state for stale/error handling.
+    """
     if is_stale:
-        return "CRITICAL"
+        # All sensors show CRITICAL on stale data
+        return {name: "CRITICAL" for name in sensor_data}, "CRITICAL"
 
-    worst_state = "NORMAL"
+    states = {}
+    worst  = "NORMAL"
 
     for name, temp in sensor_data.items():
-        if temp is None:
-            return "CRITICAL"
-        elif temp >= temp_critical and critical_counts.get(name, 0) >= 2:
-            return "CRITICAL"
-        elif temp >= temp_warning:
-            if worst_state == "NORMAL":
-                worst_state = "WARNING"
+        thresholds    = sensor_thresholds.get(name, {})
+        temp_warning  = thresholds.get('warning',  10.0)
+        temp_critical = thresholds.get('critical', 15.0)
 
-    return worst_state
+        if temp is None:
+            states[name] = "CRITICAL"
+            worst = "CRITICAL"
+        elif temp >= temp_critical and critical_counts.get(name, 0) >= 2:
+            states[name] = "CRITICAL"
+            worst = "CRITICAL"
+        elif temp >= temp_warning:
+            states[name] = "WARNING"
+            if worst == "NORMAL":
+                worst = "WARNING"
+        else:
+            states[name] = "NORMAL"
+
+    return states, worst
 
 
 # ---------------------------------------------------------------------------
 # Frame rendering
 # ---------------------------------------------------------------------------
 
-def draw_frame(sensor_data, sensor_order, state, is_stale, width, height):
-    """Constructs a Pillow RGB image with the appropriate colors and flash logic.
+def _state_colors(state, flash_toggle):
+    """Return (bg_color, text_color) for a given state and flash toggle."""
+    if state == "CRITICAL":
+        if flash_toggle:
+            return (255, 0, 0), (255, 255, 255)   # Red bg, white text
+        else:
+            return (0, 0, 0), (255, 0, 0)          # Black bg, red text
+    elif state == "WARNING":
+        return (255, 255, 0), (0, 0, 0)            # Yellow bg, black text (no flash)
+    else:
+        return (0, 0, 0), (255, 255, 255)           # Black bg, white text
+
+
+def draw_frame(sensor_data, sensor_order, sensor_states, worst_state, is_stale, width, height):
+    """Constructs a Pillow RGB image with per-sensor state coloring.
 
     Layout:
-      1 sensor   — name centered top half, temp centered bottom half
-      2+ sensors — one line per sensor: name left-aligned, temp right-aligned
-                   font sized to fit the longest line
-      STALE/ERROR — single centered message
+      1 sensor   — full screen in sensor state color; name centered top, temp centered bottom
+      2+ sensors — screen divided into equal horizontal bands, one per sensor;
+                   each band rendered independently in its own state color
+      STALE      — full screen CRITICAL flash with STALE DATA message
     """
     image = Image.new("RGB", (width, height))
     draw  = ImageDraw.Draw(image)
     PAD   = 4
 
-    # 1 Hz flash: int(time.time()) % 2 toggles once per second
+    # 1 Hz flash toggle — shared across all sensors so they flash in phase
     flash_toggle = int(time.time()) % 2 == 0
 
-    if state == "CRITICAL":
-        if flash_toggle:
-            bg_color, text_color = (255, 0, 0), (255, 255, 255)
-        else:
-            bg_color, text_color = (0, 0, 0), (255, 0, 0)
-    elif state == "WARNING":
-        bg_color, text_color = (255, 255, 0), (0, 0, 0)
-    else:
-        bg_color, text_color = (0, 0, 0), (255, 255, 255)
-
-    draw.rectangle((0, 0, width, height), fill=bg_color)
-
     def fit_font(test_str, max_w):
-        """Return largest font that fits test_str within max_w pixels."""
         for fs in range(40, 8, -1):
             f  = get_font(fs)
             bb = draw.textbbox((0, 0), test_str, font=f)
@@ -194,64 +207,74 @@ def draw_frame(sensor_data, sensor_order, state, is_stale, width, height):
         return bb[2] - bb[0], bb[3] - bb[1]
 
     if is_stale:
+        bg, fg = _state_colors("CRITICAL", flash_toggle)
+        draw.rectangle((0, 0, width, height), fill=bg)
         msg  = "STALE DATA"
         font = fit_font(msg, width - PAD * 2)
         tw, th = text_wh(msg, font)
-        draw.text(((width - tw) // 2, (height - th) // 2), msg, font=font, fill=text_color)
+        draw.text(((width - tw) // 2, (height - th) // 2), msg, font=font, fill=fg)
         return image
 
-    # Build (label, temp_str) pairs in sensor_order
+    # Build lines list in sensor_order
     lines = []
     for key in sensor_order:
         temp     = sensor_data.get(key)
-        label    = key              # Full sensor name from config
         temp_str = "--.-F" if temp is None else f"{temp:.1f}F"
-        lines.append((label, temp_str))
+        state    = sensor_states.get(key, "NORMAL")
+        lines.append((key, temp_str, state))
 
     if not lines:
-        lines = [("", "NO DATA")]
+        draw.rectangle((0, 0, width, height), fill=(0, 0, 0))
+        return image
 
     if len(lines) == 1:
-        label, temp_str = lines[0]
+        label, temp_str, state = lines[0]
+        bg, fg = _state_colors(state, flash_toggle)
+        draw.rectangle((0, 0, width, height), fill=bg)
+
         half = height // 2
         font = fit_font(max(label, temp_str, key=len), width - PAD * 2)
 
         lw, lh = text_wh(label, font)
-        draw.text(((width - lw) // 2, (half - lh) // 2), label, font=font, fill=text_color)
+        draw.text(((width - lw) // 2, (half - lh) // 2), label, font=font, fill=fg)
 
         tw, th = text_wh(temp_str, font)
-        draw.text(((width - tw) // 2, half + (half - th) // 2), temp_str, font=font, fill=text_color)
+        draw.text(((width - tw) // 2, half + (half - th) // 2), temp_str, font=font, fill=fg)
 
     else:
-        # Two-font layout: small label above large temp, alternating left/right alignment.
-        # Label uses a fixed small font; temp font is sized to fit the longest temp string.
+        # Divide screen into equal horizontal bands — one per sensor
         LABEL_SIZE = 12
         label_font = get_font(LABEL_SIZE)
-        temp_font  = fit_font(max(tmp for _, tmp in lines), width - PAD * 2)
+        temp_font  = fit_font(max(tmp for _, tmp, _ in lines), width - PAD * 2)
 
         _, label_h = text_wh("Ag", label_font)
         _, temp_h  = text_wh("Ag", temp_font)
-        GROUP_PAD  = 3   # gap between label and its temp
-        PAIR_PAD   = 8   # gap between the two sensor groups
+        GROUP_PAD  = 3
+        group_h    = label_h + GROUP_PAD + temp_h
+        total_h    = group_h * len(lines) + PAD * (len(lines) - 1)
+        y_start    = (height - total_h) // 2
 
-        group_h = label_h + GROUP_PAD + temp_h
-        total_h = len(lines) * group_h + (len(lines) - 1) * PAIR_PAD
-        y       = (height - total_h) // 2
+        for i, (label, temp_str, state) in enumerate(lines):
+            bg, fg      = _state_colors(state, flash_toggle)
+            right_align = (i % 2 == 1)
 
-        for i, (label, temp_str) in enumerate(lines):
-            right_align = (i % 2 == 1)  # even=left, odd=right
+            # Calculate band bounds for background fill
+            band_top    = y_start + i * (group_h + PAD)
+            band_bottom = band_top + group_h
+            draw.rectangle((0, band_top, width, band_bottom), fill=bg)
 
-            # Draw label
+            y = band_top
+
+            # Label
             lw, _ = text_wh(label, label_font)
             lx = (width - lw - PAD) if right_align else PAD
-            draw.text((lx, y), label, font=label_font, fill=text_color)
+            draw.text((lx, y), label, font=label_font, fill=fg)
             y += label_h + GROUP_PAD
 
-            # Draw temp
+            # Temp
             tw, _ = text_wh(temp_str, temp_font)
             tx = (width - tw - PAD) if right_align else PAD
-            draw.text((tx, y), temp_str, font=temp_font, fill=text_color)
-            y += temp_h + PAIR_PAD
+            draw.text((tx, y), temp_str, font=temp_font, fill=fg)
 
     return image
 
@@ -326,11 +349,12 @@ def main():
         return  # _config_error_display loops forever, this is defensive
 
     init_display(config)
-    sensor_order  = sorted(dict(config.items('sensors')).values())
+    sensor_configs    = get_sensor_configs(config)
+    sensor_order      = [s['name'] for s in sensor_configs]
+    sensor_thresholds = {s['name']: {'warning': s['warning'], 'critical': s['critical']}
+                         for s in sensor_configs}
     refresh_rate  = config.getfloat('display', 'refresh_rate')
     stale_timeout = config.getint('alerts', 'stale_timeout')
-    temp_warning  = config.getfloat('sampling', 'temp_warning')
-    temp_critical = config.getfloat('sampling', 'temp_critical')
     disp_width    = config.getint('display', 'width')
     disp_height   = config.getint('display', 'height')
     rotation      = config.getint('display', 'rotation')
@@ -380,9 +404,10 @@ def main():
         print("Splash complete — starting normal display loop.")
 
     while True:
-        is_stale    = False
-        sensor_data = {}
-        state       = "NORMAL"
+        is_stale     = False
+        sensor_data  = {}
+        state        = "NORMAL"
+        sensor_states = {}
         if not os.path.exists(IPC_FILE):
             state = "NORMAL"   # Show empty/booting state
         else:
@@ -415,7 +440,9 @@ def main():
                         last_ipc_timestamp = ipc_timestamp
                         for name, temp in sensor_data.items():
                             if temp is not None:
-                                if temp >= temp_critical:
+                                t = sensor_thresholds.get(name, {})
+                                crit = t.get('critical', 15.0)
+                                if temp >= crit:
                                     critical_read_counts[name] = critical_read_counts.get(name, 0) + 1
                                 else:
                                     critical_read_counts[name] = 0
@@ -423,8 +450,8 @@ def main():
                             # during an active critical condition should not reset the alarm
 
                     if first_real_read:
-                        state = evaluate_worst_state(
-                            sensor_data, is_stale, temp_warning, temp_critical, critical_read_counts
+                        sensor_states, state = evaluate_sensor_states(
+                            sensor_data, is_stale, sensor_thresholds, critical_read_counts
                         )
 
             except (json.JSONDecodeError, KeyError):
@@ -433,7 +460,9 @@ def main():
                     if parse_error_count >= 3:
                         state = "CRITICAL"
 
-        frame = draw_frame(sensor_data, sensor_order, state, is_stale, buf_width, buf_height)
+        if not sensor_states:
+            sensor_states = {name: state for name in sensor_order}
+        frame = draw_frame(sensor_data, sensor_order, sensor_states, state, is_stale, buf_width, buf_height)
         push_to_display(frame)
 
         time.sleep(refresh_rate)
