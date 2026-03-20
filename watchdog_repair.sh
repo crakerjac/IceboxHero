@@ -10,9 +10,17 @@
 # attempt repair again rather than proceeding to reboot.
 
 ALERT_STATE="/data/config/alert_state.json"
+CONFIG_FILE="/data/config/config.ini"
 LOG_FILE="/data/logs/watchdog_repair.log"
-COOLDOWN=3600        # Must match email_cooldown in config.ini
+mkdir -p "$(dirname "${LOG_FILE}")"
 SERVICE_USER="pi"    # User that runs icebox-alert.service
+
+# Read email_cooldown directly from config.ini — avoids hardcoded value drifting out of sync
+COOLDOWN=$(awk -F'=' '/^email_cooldown/{gsub(/ /,"",$2); print $2}' "${CONFIG_FILE}" 2>/dev/null)
+if [[ -z "${COOLDOWN}" ]]; then
+    COOLDOWN=3600  # Fallback if config.ini is unreadable
+    log "WARNING: Could not read email_cooldown from config.ini — using default ${COOLDOWN}s"
+fi
 
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') watchdog_repair: $*" | tee -a "${LOG_FILE}"

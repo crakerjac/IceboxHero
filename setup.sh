@@ -170,6 +170,23 @@ rm -f /etc/.iceboxhero_write_test
 success "Root filesystem is writable"
 
 # =============================================================================
+# =============================================================================
+# STEP 0b — Disable cloud-init
+# =============================================================================
+header "Disabling cloud-init"
+
+# cloud-init is a cloud provisioning tool with no purpose on a local Pi deployment.
+# It adds 6+ seconds to boot time and delays service startup unnecessarily.
+for svc in cloud-init cloud-init-local cloud-final cloud-config; do
+    if systemctl is-enabled "${svc}" 2>/dev/null | grep -q "enabled"; then
+        systemctl disable "${svc}" 2>/dev/null || true
+        success "Disabled: ${svc}"
+    else
+        info "Already disabled: ${svc}"
+    fi
+done
+
+# =============================================================================
 # STEP 1 — /boot/firmware/config.txt
 # =============================================================================
 header "Configuring /boot/firmware/config.txt"
@@ -291,10 +308,13 @@ success "Deployed: templates/index.html"
 
 # Static assets
 if [[ -f "${SCRIPT_DIR}/static/favicon.png" ]]; then
-    install -m 644 -o "${REAL_USER}" -g "${REAL_USER}" \
-        "${SCRIPT_DIR}/static/favicon.png" \
-        "/opt/iceboxhero/static/favicon.png"
+    install -m 644 -o "${REAL_USER}" -g "${REAL_USER}"         "${SCRIPT_DIR}/static/favicon.png"         "/opt/iceboxhero/static/favicon.png"
     success "Deployed: static/favicon.png"
+fi
+
+if [[ -f "${SCRIPT_DIR}/static/splash.jpg" ]]; then
+    install -m 644 -o "${REAL_USER}" -g "${REAL_USER}"         "${SCRIPT_DIR}/static/splash.jpg"         "/opt/iceboxhero/static/splash.jpg"
+    success "Deployed: static/splash.jpg"
 fi
 
 install -m 644 -o "${REAL_USER}" -g "${REAL_USER}" \

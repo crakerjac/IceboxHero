@@ -1,6 +1,5 @@
 [Unit]
 Description=IceboxHero — LCD Display Service
-After=network.target
 RequiresMountsFor=/data
 
 [Service]

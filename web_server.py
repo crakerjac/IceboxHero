@@ -20,35 +20,37 @@ import subprocess
 import shutil
 
 from flask import Flask, jsonify, render_template
-from config_helper import load_config
+from config_helper import load_config, safe_read_json
 
 app = Flask(__name__)
 
 VERSION_FILE = os.path.join(os.path.dirname(__file__), 'VERSION')
 
-def get_version():
+def _read_version():
     try:
         with open(VERSION_FILE) as f:
             return f.read().strip()
     except Exception:
         return 'unknown'
 
-config        = load_config()
-IPC_FILE      = "/run/iceboxhero/telemetry_state.json"
-DB_FILE       = "/run/icebox_db/freezer_monitor.db"   # Live RAM database
-WEB_PORT      = config.getint('network', 'web_port')
-TEMP_WARNING  = config.getfloat('sampling', 'temp_warning')
-TEMP_CRITICAL = config.getfloat('sampling', 'temp_critical')
+VERSION = _read_version()   # Cached at startup — no file I/O on each request
 
+IPC_FILE = "/run/iceboxhero/telemetry_state.json"
+DB_FILE  = "/run/icebox_db/freezer_monitor.db"   # Live RAM database
 
-def safe_read_json(path, retries=3):
-    for _ in range(retries):
-        try:
-            with open(path, 'r') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            time.sleep(0.05)
-    return None
+# Load config at module level — web_server is a long-running process and
+# config is needed at import time for Flask route registration context.
+# If config fails here the process exits before serving any requests,
+# which is the correct behavior.
+try:
+    config        = load_config()
+    WEB_PORT      = config.getint('network', 'web_port')
+    TEMP_WARNING  = config.getfloat('sampling', 'temp_warning')
+    TEMP_CRITICAL = config.getfloat('sampling', 'temp_critical')
+except Exception as e:
+    print(f"FATAL: config load failed: {e}")
+    raise
+
 
 
 def get_current_state():
@@ -167,7 +169,7 @@ def get_system_status():
 @app.route('/')
 def index():
     """Serves the main dashboard, injecting threshold values from config."""
-    return render_template('index.html', warning=TEMP_WARNING, critical=TEMP_CRITICAL, version=get_version())
+    return render_template('index.html', warning=TEMP_WARNING, critical=TEMP_CRITICAL, version=VERSION)
 
 
 @app.route('/api/current')

@@ -1,5 +1,21 @@
 import configparser
+import json
 import os
+import time
+
+
+def safe_read_json(path, retries=3):
+    """Read and parse a JSON file with retries on decode/IO error.
+    Shared utility used by alert_service, display_service, and web_server.
+    Returns parsed object or None on failure.
+    """
+    for _ in range(retries):
+        try:
+            with open(path, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            time.sleep(0.05)
+    return None
 
 
 CONFIG_PATH   = '/data/config/config.ini'
@@ -131,3 +147,6 @@ def load_config(config_path=CONFIG_PATH, template_path=TEMPLATE_PATH):
         )
 
     return config
+
+
+

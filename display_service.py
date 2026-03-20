@@ -22,12 +22,13 @@ import os
 import time
 import json
 from PIL import Image, ImageDraw, ImageFont
-from config_helper import load_config
+from config_helper import load_config, safe_read_json
 import board
 import digitalio
 from adafruit_rgb_display import st7735
 
-IPC_FILE  = "/run/iceboxhero/telemetry_state.json"
+IPC_FILE    = "/run/iceboxhero/telemetry_state.json"
+SPLASH_PATH = os.path.join(os.path.dirname(__file__), "static", "splash.jpg")
 FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 
@@ -45,19 +46,40 @@ def get_font(font_size):
 
 
 # ---------------------------------------------------------------------------
+# Splash screen
+# ---------------------------------------------------------------------------
+
+_splash_image = None   # Pre-loaded and resized at startup
+
+
+def load_splash(buf_width, buf_height):
+    """Load splash.jpg once at startup, resize to buffer dimensions."""
+    global _splash_image
+    if not os.path.exists(SPLASH_PATH):
+        print(f"WARNING: Splash image not found at {SPLASH_PATH}")
+        return
+    try:
+        img = Image.open(SPLASH_PATH).convert("RGB")
+        img = img.resize((buf_width, buf_height), Image.LANCZOS)
+        _splash_image = img
+        print(f"Splash image loaded: {SPLASH_PATH} → {buf_width}x{buf_height}")
+    except Exception as e:
+        print(f"WARNING: Failed to load splash image: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Hardware interface
 # ---------------------------------------------------------------------------
 
 _display = None   # Module-level display object — initialized once at startup
 
 
-def init_display():
+def init_display(config):
     """Initialize the SPI connection to the ST7735S using adafruit_rgb_display.
     Retries up to 5 times with a delay — the SPI bus may not be fully ready
     immediately at boot, especially when service starts before hardware settles.
     """
     global _display
-    config  = load_config()
     dc_pin  = config.getint('hardware', 'lcd_dc_pin',  fallback=24)
     width   = config.getint('display',  'width',       fallback=128)
     height  = config.getint('display',  'height',      fallback=160)
@@ -124,15 +146,6 @@ def evaluate_worst_state(sensor_data, is_stale, temp_warning, temp_critical, cri
                 worst_state = "WARNING"
 
     return worst_state
-
-
-def format_temperature_string(sensor_data, sensor_order):
-    """Formats temperatures in alphabetical sensor order for consistent layout."""
-    parts = []
-    for key in sensor_order:
-        temp = sensor_data.get(key)
-        parts.append("--.-F" if temp is None else f"{temp:.1f}F")
-    return " | ".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -247,15 +260,6 @@ def draw_frame(sensor_data, sensor_order, state, is_stale, width, height):
 # Safe JSON reader
 # ---------------------------------------------------------------------------
 
-def safe_read_json(path, retries=3):
-    for _ in range(retries):
-        try:
-            with open(path, 'r') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            time.sleep(0.05)
-    return None
-
 
 # ---------------------------------------------------------------------------
 # Main loop
@@ -268,8 +272,11 @@ def _config_error_display(error):
     then loops forever so the message stays visible and systemd doesn't
     restart-loop. Healthchecks.io heartbeat stops → email arrives after timeout.
     """
-    DC_PIN  = 24   # Hardcoded fallbacks — match default config
+    # Hardcoded fallbacks — match default config values
+    DC_PIN  = 24
     RST_PIN = 25
+    # Use portrait buffer (pre-rotation physical dimensions) as safe fallback
+    BUF_W, BUF_H = 128, 160
 
     print(f"FATAL: config load failed: {error}")
     print(f"Attempting to show CONFIG ERROR on display (DC={DC_PIN}, RST={RST_PIN}).")
@@ -278,26 +285,26 @@ def _config_error_display(error):
         spi = board.SPI()
         cs  = digitalio.DigitalInOut(board.CE0)
         dc  = digitalio.DigitalInOut(getattr(board, f'D{DC_PIN}'))
+        rst = digitalio.DigitalInOut(getattr(board, f'D{RST_PIN}'))
         display = st7735.ST7735R(
-            spi, dc=dc, cs=cs, rst=None,
-            width=128, height=160, rotation=0, bgr=True,
+            spi, dc=dc, cs=cs, rst=rst,
+            width=BUF_W, height=BUF_H, rotation=0, bgr=True,
             baudrate=24000000,
         )
 
-        img  = Image.new("RGB", (128, 160), (180, 0, 0))
+        img  = Image.new("RGB", (BUF_W, BUF_H), (180, 0, 0))
         draw = ImageDraw.Draw(img)
         try:
             font = ImageFont.truetype(FONT_PATH, 14)
         except Exception:
             font = ImageFont.load_default()
 
-        draw.text((4,  20), "CONFIG",  fill=(255, 255, 255), font=font)
-        draw.text((4,  42), "ERROR",   fill=(255, 255, 255), font=font)
-        draw.text((4,  74), "Check:",  fill=(255, 200, 200), font=font)
-        draw.text((4,  92), "/data/",  fill=(255, 200, 200), font=font)
-        draw.text((4, 108), "config/", fill=(255, 200, 200), font=font)
-        draw.text((4, 124), "config",  fill=(255, 200, 200), font=font)
-        draw.text((4, 140), ".ini",    fill=(255, 200, 200), font=font)
+        # Center text vertically for whatever buffer size we have
+        draw.text((4, BUF_H // 5),      "CONFIG",  fill=(255, 255, 255), font=font)
+        draw.text((4, BUF_H // 5 + 22), "ERROR",   fill=(255, 255, 255), font=font)
+        draw.text((4, BUF_H // 2),      "Check:",  fill=(255, 200, 200), font=font)
+        draw.text((4, BUF_H // 2 + 18), "/data/config/config.ini",
+                  fill=(255, 200, 200), font=font)
 
         push_to_display(img)
         print("CONFIG ERROR frame pushed to display.")
@@ -311,15 +318,17 @@ def _config_error_display(error):
 
 def main():
     print("Starting Display Service...")
-    init_display()
 
     try:
         config = load_config()
     except Exception as e:
         _config_error_display(e)
+        return  # _config_error_display loops forever, this is defensive
+
+    init_display(config)
     sensor_order  = sorted(dict(config.items('sensors')).values())
     refresh_rate  = config.getfloat('display', 'refresh_rate')
-    stale_timeout = config.getint('display', 'stale_timeout')
+    stale_timeout = config.getint('alerts', 'stale_timeout')
     temp_warning  = config.getfloat('sampling', 'temp_warning')
     temp_critical = config.getfloat('sampling', 'temp_critical')
     disp_width    = config.getint('display', 'width')
@@ -332,48 +341,80 @@ def main():
     else:
         buf_width, buf_height = disp_width, disp_height
 
+    splash_duration      = config.getint('display', 'splash_duration', fallback=60)
     last_ipc_timestamp   = 0
     critical_read_counts = {}
     parse_error_count    = 0   # Consecutive JSON parse failures before alarming
-    # Startup grace: suppress CRITICAL state for the first poll cycle (up to
-    # poll_interval seconds) so the boot-time all-None IPC state doesn't
-    # flash a false critical alarm before real sensor data arrives.
-    startup_grace_until  = time.monotonic() + config.getint('sampling', 'poll_interval')
+    # Grace mode: hold neutral display state until the first real sensor read
+    # arrives (IPC timestamp > 0). This prevents false CRITICAL flashes between
+    # splash end and first sensor poll regardless of timing.
+    first_real_read      = False
+
+    # Clear any stale framebuffer content immediately after init —
+    # the hardware holds the last image until we push something new.
+    push_to_display(Image.new("RGB", (buf_width, buf_height), (0, 0, 0)))
+
+    # Load splash image and show it immediately
+    load_splash(buf_width, buf_height)
+    if _splash_image is not None and splash_duration > 0:
+        push_to_display(_splash_image)
+        print(f"Showing splash screen (max {splash_duration}s, exits early on first sensor read)...")
+        splash_start = time.monotonic()
+        while True:
+            elapsed = time.monotonic() - splash_start
+            # Exit early if real sensor data arrives
+            if os.path.exists(IPC_FILE):
+                payload = safe_read_json(IPC_FILE)
+                if payload and isinstance(payload, dict):
+                    sd = payload.get("sensors", {})
+                    ts = payload.get("timestamp", 0)
+                    if ts > 0 and any(v is not None for v in sd.values()):
+                        first_real_read = True
+                        print(f"First real sensor read detected after {elapsed:.1f}s — ending splash early.")
+                        break
+            # Exit after maximum splash_duration regardless of sensor state
+            if elapsed >= splash_duration:
+                print(f"Splash duration reached ({splash_duration}s) — entering normal operation.")
+                break
+            time.sleep(0.5)
+        print("Splash complete — starting normal display loop.")
 
     while True:
         is_stale    = False
         sensor_data = {}
         state       = "NORMAL"
-        in_grace    = time.monotonic() < startup_grace_until
-
         if not os.path.exists(IPC_FILE):
             state = "NORMAL"   # Show empty/booting state
         else:
             mtime = os.path.getmtime(IPC_FILE)
-            if (time.time() - mtime) > stale_timeout:
+            if first_real_read and (time.time() - mtime) > stale_timeout:
                 is_stale = True
 
             try:
                 payload = safe_read_json(IPC_FILE)
 
                 if payload is None:
-                    # Treat read failure same as missing file during grace period
-                    if not in_grace:
+                    # Stay neutral until first real read confirmed
+                    if first_real_read:
                         parse_error_count += 1
                         if parse_error_count >= 3:
                             state = "CRITICAL"
-                    # else: stay NORMAL during boot grace
                 else:
-                    parse_error_count = 0   # Reset on successful read
+                    parse_error_count = 0
                     sensor_data   = payload.get("sensors", {})
                     ipc_timestamp = payload.get("timestamp", 0)
+
+                    # Detect first real sensor read: timestamp > 0 and at least
+                    # one sensor has a non-None value
+                    if not first_real_read and ipc_timestamp > 0 and                        any(v is not None for v in sensor_data.values()):
+                        first_real_read = True
+                        print("First real sensor read received — entering normal display mode.")
 
                     # Only update critical counters on a new sensor poll
                     if ipc_timestamp != last_ipc_timestamp:
                         last_ipc_timestamp = ipc_timestamp
                         for name, temp in sensor_data.items():
                             if temp is not None:
-                                # Only update counter for valid readings
                                 if temp >= temp_critical:
                                     critical_read_counts[name] = critical_read_counts.get(name, 0) + 1
                                 else:
@@ -381,13 +422,13 @@ def main():
                             # None reading: leave counter unchanged — a dead sensor
                             # during an active critical condition should not reset the alarm
 
-                    if not in_grace:
+                    if first_real_read:
                         state = evaluate_worst_state(
                             sensor_data, is_stale, temp_warning, temp_critical, critical_read_counts
                         )
 
             except (json.JSONDecodeError, KeyError):
-                if not in_grace:
+                if first_real_read:
                     parse_error_count += 1
                     if parse_error_count >= 3:
                         state = "CRITICAL"

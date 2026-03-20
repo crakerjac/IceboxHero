@@ -28,7 +28,7 @@ import urllib.request
 from email.message import EmailMessage
 from gpiozero import Buzzer
 import RPi.GPIO as _RPIGPIO
-from config_helper import load_config
+from config_helper import load_config, safe_read_json
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -63,12 +63,12 @@ except Exception as e:
 
 IPC_FILE                 = "/run/iceboxhero/telemetry_state.json"
 ALERT_STATE_FILE         = "/data/config/alert_state.json"
-STALE_THRESHOLD_SECONDS  = config.getint('display', 'stale_timeout')
+STALE_THRESHOLD_SECONDS  = config.getint('alerts', 'stale_timeout')
 SILENCE_DURATION_SECONDS = config.getint('alerts', 'silence_duration')
 EMAIL_COOLDOWN_SECONDS   = config.getint('alerts', 'email_cooldown')
 NTP_SYNC_YEAR            = config.getint('system', 'ntp_sync_year')
 FREEZE_THRESHOLD         = config.getint('alerts', 'sensor_freeze_seconds')
-CHECKIN_INTERVAL_DAYS    = config.getint('alerts', 'checkin_interval_days', fallback=30)
+CHECKIN_INTERVAL_DAYS    = config.getint('alerts', 'checkin_interval_days')
 EMAIL_ALIVE_URL          = config.get('network', 'email_alive_url', fallback='')
 MAX_EMAIL_QUEUE          = 100
 
@@ -107,6 +107,7 @@ last_email_sent_times   = {}  # {"sensor_ALERTTYPE": monotonic_timestamp}
 critical_read_counts    = {}  # {"sensor_name": consecutive_critical_count}
 sensor_failed_state     = {}  # {"sensor_name": bool} — True while sensor is reporting None
 sensor_warning_state    = {}  # {"sensor_name": bool} — True while sensor is in warning zone
+sensor_none_counts      = {}  # {"sensor_name": int} — consecutive None read count
 last_freeze_email       = 0
 
 
@@ -323,15 +324,6 @@ def wait_for_ntp_sync():
 # Safe JSON reader
 # ---------------------------------------------------------------------------
 
-def safe_read_json(path, retries=3):
-    for _ in range(retries):
-        try:
-            with open(path, 'r') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            time.sleep(0.05)
-    return None
-
 
 # ---------------------------------------------------------------------------
 # Main loop
@@ -349,10 +341,10 @@ def main():
 
     DB_CORRUPT_FLAG    = "/run/iceboxhero/db_corrupted.flag"
     last_ipc_timestamp = 0
-    # Suppress sensor FAILURE alerts for the first 60 seconds after startup.
-    # sensor_service needs time to get first 1-wire readings — during this window
-    # it writes null values that would otherwise trigger spurious FAILURE emails.
-    startup_grace_until = time.monotonic() + 60
+    # Grace mode: suppress FAILURE/CRITICAL alerts until the first real sensor
+    # read arrives (IPC timestamp > 0 with at least one non-None value).
+    # This cleanly handles any boot timing without relying on fixed timers.
+    first_real_read = False
 
     while True:
         is_stale      = False
@@ -397,17 +389,30 @@ def main():
                     if is_new_read:
                         last_ipc_timestamp = ipc_timestamp
 
+                    # --- Detect first real sensor read ---
+                    if not first_real_read and \
+                       ipc_timestamp > 0 and \
+                       any(v is not None for v in sensor_data.values()):
+                        first_real_read = True
+                        print("First real sensor read confirmed — alerts active.")
+
                     # --- Evaluate temperature alerts ---
-                    in_grace = time.monotonic() < startup_grace_until
                     for name, temp in sensor_data.items():
                         if temp is None:
                             trigger_buzzer = True
-                            if is_new_read and not in_grace:
-                                sensor_failed_state[name] = True
-                                sensor_warning_state[name] = False
-                                queue_email("FAILURE", name, "MISSING/READ ERROR")
-                                critical_read_counts[name] = 0
+                            if is_new_read and first_real_read:
+                                sensor_none_counts[name] = sensor_none_counts.get(name, 0) + 1
+                                if sensor_none_counts[name] >= 3 and \
+                                   not sensor_failed_state.get(name, False):
+                                    sensor_failed_state[name] = True
+                                    sensor_warning_state[name] = False
+                                    queue_email("FAILURE", name, "MISSING/READ ERROR")
+                                # Do NOT reset critical_read_counts here — a sensor dying
+                                # mid-critical should not clear an active alarm state
                         else:
+                            # Sensor recovered — reset none count
+                            if is_new_read:
+                                sensor_none_counts[name] = 0
                             # Sensor recovered from a previous FAILURE state
                             if is_new_read and sensor_failed_state.get(name, False):
                                 sensor_failed_state[name] = False
