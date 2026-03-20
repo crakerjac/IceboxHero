@@ -19,7 +19,7 @@ import os
 import time
 import json
 
-from config_helper import load_config
+from config_helper import load_config, get_sensor_configs, get_sensor_configs
 
 IPC_TEMP_FILE = "/run/iceboxhero/telemetry_state.tmp"
 IPC_FILE      = "/run/iceboxhero/telemetry_state.json"
@@ -106,12 +106,12 @@ def write_ipc_state(sensor_data):
 def main():
     print("Starting Sensor Acquisition Service...")
 
-    config = load_config()
-    poll_interval      = config.getint('sampling', 'poll_interval')
-    configured_sensors = dict(config.items('sensors'))  # {"28-xxxx": "logical_name", ...}
+    config         = load_config()
+    poll_interval  = config.getint('sampling', 'poll_interval')
+    sensor_configs = get_sensor_configs(config)  # [{id, name, warning, critical}, ...]
 
     # Write an initial all-None boot state so consumers don't crash on missing file
-    boot_state = {name: None for name in configured_sensors.values()}
+    boot_state = {s['name']: None for s in sensor_configs}
     write_ipc_state(boot_state)
 
     while True:
@@ -121,7 +121,9 @@ def main():
         # Read sensors sequentially — the 1-Wire bus is a single-wire protocol
         # and cannot support concurrent reads. Parallel threads cause bus
         # contention and intermittent timeouts.
-        for rom_id, logical_name in configured_sensors.items():
+        for sensor in sensor_configs:
+            rom_id        = sensor['id']
+            logical_name  = sensor['name']
             device_folder = os.path.join(BASE_DIR, rom_id)
             if os.path.exists(device_folder):
                 current_readings[logical_name] = process_sensor(device_folder)

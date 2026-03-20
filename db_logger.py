@@ -35,13 +35,11 @@ import shutil
 import threading
 import urllib.request
 from datetime import datetime
-from config_helper import load_config
+from config_helper import load_config, safe_read_json
 
 # ---------------------------------------------------------------------------
 # Paths and constants
 # ---------------------------------------------------------------------------
-
-config = load_config()
 
 DB_DIR          = "/data/db"
 DB_FILE         = os.path.join(DB_DIR, "freezer_monitor.db")        # SD card backup
@@ -49,10 +47,6 @@ RAM_DB_DIR      = "/run/icebox_db"
 RAM_DB_FILE     = os.path.join(RAM_DB_DIR, "freezer_monitor.db")    # Live runtime DB
 IPC_FILE        = "/run/iceboxhero/telemetry_state.json"
 DB_CORRUPT_FLAG = "/run/iceboxhero/db_corrupted.flag"
-
-POLL_INTERVAL_SECONDS = config.getint('sampling', 'db_commit_interval')
-NTP_SYNC_YEAR         = config.getint('system', 'ntp_sync_year')
-
 
 # ---------------------------------------------------------------------------
 # RAM ↔ SD backup
@@ -82,6 +76,7 @@ def backup_ram_db_to_disk():
             print(f"WARNING: Could not write last_backup timestamp: {e}")
 
         # Prune old rows from RAM to prevent unbounded growth on long uptimes
+        config         = load_config()
         retention_days = config.getint('database', 'retention_days')
         cursor = src.cursor()
         cursor.execute(
@@ -101,7 +96,6 @@ def backup_ram_db_to_disk():
                 src.close()
             except Exception:
                 pass
-
 
 def restore_db_from_backup():
     """On boot, copies the last SD backup into the RAM database."""
@@ -133,13 +127,11 @@ def restore_db_from_backup():
             except Exception:
                 pass
 
-
 def backup_loop(interval_seconds):
     """Background thread: fires backup_ram_db_to_disk() on the configured interval."""
     while True:
         time.sleep(interval_seconds)
         backup_ram_db_to_disk()
-
 
 # ---------------------------------------------------------------------------
 # Boot integrity check
@@ -175,7 +167,6 @@ def verify_and_recover_db():
         with open(DB_CORRUPT_FLAG, 'w') as f:
             f.write(str(time.time()))
 
-
 # ---------------------------------------------------------------------------
 # Schema init
 # ---------------------------------------------------------------------------
@@ -200,39 +191,23 @@ def init_db():
     finally:
         conn.close()
 
-
 # ---------------------------------------------------------------------------
 # NTP gate
 # ---------------------------------------------------------------------------
 
-def wait_for_ntp_sync():
+def wait_for_ntp_sync(ntp_sync_year):
     """Blocks until the system clock year reaches ntp_sync_year."""
     print("Checking system clock synchronization for Database Logger...")
-    while time.gmtime().tm_year < NTP_SYNC_YEAR:
+    while time.gmtime().tm_year < ntp_sync_year:
         print("Clock unsynced. Halting database writes until NTP resolves...")
         time.sleep(5)
     print("Clock synchronized. Database logging authorized.")
-
-
-# ---------------------------------------------------------------------------
-# Safe JSON reader
-# ---------------------------------------------------------------------------
-
-def safe_read_json(path, retries=3):
-    for _ in range(retries):
-        try:
-            with open(path, 'r') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            time.sleep(0.05)
-    return None
-
 
 # ---------------------------------------------------------------------------
 # Telemetry insert
 # ---------------------------------------------------------------------------
 
-def log_telemetry():
+def log_telemetry(ntp_sync_year, heartbeat_url):
     """Reads the IPC file and inserts valid sensor readings into the RAM database."""
     if not os.path.exists(IPC_FILE):
         print("IPC file not found, skipping DB write.")
@@ -247,7 +222,7 @@ def log_telemetry():
         ipc_timestamp = payload.get("timestamp", 0)
 
         # Reject pre-NTP timestamps
-        if time.gmtime(ipc_timestamp).tm_year < NTP_SYNC_YEAR:
+        if time.gmtime(ipc_timestamp).tm_year < ntp_sync_year:
             print("IPC data has pre-NTP timestamp. Skipping write.")
             return
 
@@ -266,16 +241,14 @@ def log_telemetry():
             conn.close()
 
         # Heartbeat ping — only fires on successful write
-        heartbeat = config.get('network', 'heartbeat_url', fallback='')
-        if heartbeat:
+        if heartbeat_url:
             try:
-                urllib.request.urlopen(heartbeat, timeout=10)
+                urllib.request.urlopen(heartbeat_url, timeout=10)
             except Exception as e:
                 print(f"Heartbeat ping failed (non-fatal): {e}")
 
     except (json.JSONDecodeError, KeyError, sqlite3.Error) as e:
         print(f"Failed to log telemetry: {e}")
-
 
 # ---------------------------------------------------------------------------
 # Entry point
@@ -283,6 +256,10 @@ def log_telemetry():
 
 def main():
     print("Starting Database Logger...")
+
+    config                = load_config()
+    POLL_INTERVAL_SECONDS = config.getint('sampling', 'db_commit_interval')
+    NTP_SYNC_YEAR         = config.getint('system', 'ntp_sync_year')
 
     os.makedirs(DB_DIR, exist_ok=True)
     os.makedirs(RAM_DB_DIR, exist_ok=True)
@@ -292,19 +269,20 @@ def main():
     verify_and_recover_db()
     restore_db_from_backup()
     init_db()
-    wait_for_ntp_sync()     # Block writes until clock is valid
+    wait_for_ntp_sync(NTP_SYNC_YEAR)     # Block writes until clock is valid
 
     backup_interval = config.getint('database', 'backup_interval_hours') * 3600
     backup_thread   = threading.Thread(target=backup_loop, args=(backup_interval,), daemon=True)
     backup_thread.start()
 
+    heartbeat_url = config.get('network', 'heartbeat_url', fallback='')
+
     while True:
         loop_start = time.monotonic()
-        log_telemetry()
+        log_telemetry(NTP_SYNC_YEAR, heartbeat_url)
         elapsed    = time.monotonic() - loop_start
         sleep_time = max(0, POLL_INTERVAL_SECONDS - elapsed)
         time.sleep(sleep_time)
-
 
 if __name__ == "__main__":
     main()

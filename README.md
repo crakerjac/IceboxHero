@@ -57,11 +57,7 @@ Eight modules make up the full system. Module 0 (`config_helper.py`) is a shared
 
 <p align="center"><img src="docs/architecture-overview.png" alt="System Architecture Diagram"></p>
 
-> For full design notes and the complete module diagram see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-
-> **Note:** Module 0 (Configuration) and Module 1 (OS & Services) are not shown in the data-flow diagram — they are cross-cutting infrastructure. `config_helper.py` is imported by every module; the systemd units and watchdog underpin all six services.
-
-For full architecture diagrams, boot sequence, watchdog loop, email queue internals, and storage layout see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+> Modules 0 and 1 are cross-cutting infrastructure — `config_helper.py` is imported by every service; the systemd units and watchdog underpin all six. They are intentionally omitted from the data-flow diagram above. For full design notes see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ### Module Summary
 
@@ -75,7 +71,6 @@ For full architecture diagrams, boot sequence, watchdog loop, email queue intern
 | 5 — Database Logger | `db_logger.py` | RAM SQLite DB; 4-hour SD backup; automatic pruning on each backup cycle |
 | 6 — Web Server | `web_server.py`, `templates/index.html` | Flask REST API; 24-hour graph dashboard |
 
-> **Note:** Modules 0 and 1 are infrastructure — they configure and supervise the runtime modules but have no role in the live data flow. They are intentionally omitted from the architecture diagram.
 
 ---
 
@@ -91,7 +86,6 @@ Three storage areas with distinct access patterns:
 
 **SD card writes under normal operation:**
 - One full database backup every 4 hours (configurable)
-- Weekly CRON maintenance log
 - Zero writes from the OS root partition
 
 The live database resides entirely in RAM (`/run/icebox_db/freezer_monitor.db`). On each boot it is restored from the last SD card backup. On a sudden power loss, up to 4 hours of temperature history may be lost — this is intentional. The SD card's longevity is the design priority.
@@ -118,7 +112,7 @@ All thresholds are configurable in `config.ini`.
 
 Emails arrive with one of two subject prefixes to support inbox filtering:
 
-- **`[ALERT]`** — Requires immediate attention. Covers: CRITICAL, WARNING, FAILURE, SYSTEM_FREEZE, SYSTEM_ERROR, WATCHDOG_REBOOT.
+- **`[ALERT]`** — Requires immediate attention. Covers: CRITICAL, WARNING, FAILURE, SYSTEM_FREEZE, SYSTEM_ERROR.
 - **`[STATUS]`** — Informational only. Covers: SYSTEM_BOOT, CHECKIN.
 
 **Recommended Gmail filter:** Subject contains `[STATUS] IceboxHero` → Skip Inbox, Mark as read, Apply label.
@@ -468,7 +462,6 @@ iceboxhero/
 ├── web_server.py                # Flask API and dashboard       (Module 6)
 ├── mock_sensors.py              # Dev tool — simulates sensors without hardware
 ├── display_test.py              # Dev tool — identifies display variant, writes config
-├── watchdog_repair.sh           # Called by watchdog before reboot — sets pending email flag
 ├── templates/
 │   └── index.html               # Web dashboard UI
 ├── static/

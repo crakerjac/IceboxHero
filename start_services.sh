@@ -78,7 +78,7 @@ if [[ ! -f "${CONFIG_FILE}" ]]; then
     exit 1
 fi
 
-if grep -q "28-00000xxxxxxx" "${CONFIG_FILE}"; then
+if grep -q "00000xxxxxxx\|00000yyyyyyy" "${CONFIG_FILE}"; then
     warn "config.ini still contains placeholder sensor ROM IDs."
     warn "Edit ${CONFIG_FILE} before starting — services will not work correctly."
     echo ""
