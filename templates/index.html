@@ -77,8 +77,10 @@
     let historyChart = null;
 
     // Thresholds injected from config.ini via Jinja2 — no hardcoding required
-    const tempWarning  = {{ warning }};
-    const tempCritical = {{ critical }};
+    // Per-sensor thresholds — falls back to global if sensor not found
+    const sensorThresholds = {{ sensor_thresholds | tojson }};
+    const globalWarning    = {{ global_warning }};
+    const globalCritical   = {{ global_critical }};
 
     function updateCurrentTemps() {
         fetch('/api/current')
@@ -95,9 +97,12 @@
                         let statusClass  = 'status-normal';
                         let displayTemp  = temp === null ? '--.-' : temp.toFixed(1);
 
-                        if (temp === null || temp >= tempCritical) {
+                        const thresholds = sensorThresholds[sensor] || {};
+                        const warnTemp = thresholds.warning  !== undefined ? thresholds.warning  : globalWarning;
+                        const critTemp = thresholds.critical !== undefined ? thresholds.critical : globalCritical;
+                        if (temp === null || temp >= critTemp) {
                             statusClass = 'status-critical';
-                        } else if (temp >= tempWarning) {
+                        } else if (temp >= warnTemp) {
                             statusClass = 'status-warning';
                         }
 

@@ -242,7 +242,8 @@ def draw_frame(sensor_data, sensor_order, sensor_states, worst_state, is_stale, 
         draw.text(((width - tw) // 2, half + (half - th) // 2), temp_str, font=font, fill=fg)
 
     else:
-        # Divide screen into equal horizontal bands — one per sensor
+        # Divide screen into equal horizontal bands — one per sensor, no gaps.
+        # Each band fills exactly its share of the screen height.
         LABEL_SIZE = 12
         label_font = get_font(LABEL_SIZE)
         temp_font  = fit_font(max(tmp for _, tmp, _ in lines), width - PAD * 2)
@@ -250,20 +251,20 @@ def draw_frame(sensor_data, sensor_order, sensor_states, worst_state, is_stale, 
         _, label_h = text_wh("Ag", label_font)
         _, temp_h  = text_wh("Ag", temp_font)
         GROUP_PAD  = 3
-        group_h    = label_h + GROUP_PAD + temp_h
-        total_h    = group_h * len(lines) + PAD * (len(lines) - 1)
-        y_start    = (height - total_h) // 2
+        band_h     = height // len(lines)
 
         for i, (label, temp_str, state) in enumerate(lines):
             bg, fg      = _state_colors(state, flash_toggle)
             right_align = (i % 2 == 1)
 
-            # Calculate band bounds for background fill
-            band_top    = y_start + i * (group_h + PAD)
-            band_bottom = band_top + group_h
+            # Fill entire band — no gap between bands
+            band_top    = i * band_h
+            band_bottom = band_top + band_h if i < len(lines) - 1 else height
             draw.rectangle((0, band_top, width, band_bottom), fill=bg)
 
-            y = band_top
+            # Center content vertically within the band
+            content_h = label_h + GROUP_PAD + temp_h
+            y = band_top + (band_h - content_h) // 2
 
             # Label
             lw, _ = text_wh(label, label_font)

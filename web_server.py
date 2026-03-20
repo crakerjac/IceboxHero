@@ -20,7 +20,7 @@ import subprocess
 import shutil
 
 from flask import Flask, jsonify, render_template
-from config_helper import load_config, safe_read_json
+from config_helper import load_config, safe_read_json, get_sensor_configs, get_sensor_configs
 
 app = Flask(__name__)
 
@@ -45,8 +45,13 @@ DB_FILE  = "/run/icebox_db/freezer_monitor.db"   # Live RAM database
 try:
     config        = load_config()
     WEB_PORT      = config.getint('network', 'web_port')
-    TEMP_WARNING  = config.getfloat('sampling', 'temp_warning')
-    TEMP_CRITICAL = config.getfloat('sampling', 'temp_critical')
+    # Per-sensor thresholds — {name: {warning, critical}}
+    _sensor_configs    = get_sensor_configs(config)
+    SENSOR_THRESHOLDS  = {s['name']: {'warning': s['warning'], 'critical': s['critical']}
+                          for s in _sensor_configs}
+    # Global fallbacks for any sensor not in thresholds dict
+    GLOBAL_WARNING  = config.getfloat('sampling', 'temp_warning')
+    GLOBAL_CRITICAL = config.getfloat('sampling', 'temp_critical')
 except Exception as e:
     print(f"FATAL: config load failed: {e}")
     raise
@@ -169,7 +174,11 @@ def get_system_status():
 @app.route('/')
 def index():
     """Serves the main dashboard, injecting threshold values from config."""
-    return render_template('index.html', warning=TEMP_WARNING, critical=TEMP_CRITICAL, version=VERSION)
+    return render_template('index.html',
+                       sensor_thresholds=SENSOR_THRESHOLDS,
+                       global_warning=GLOBAL_WARNING,
+                       global_critical=GLOBAL_CRITICAL,
+                       version=VERSION)
 
 
 @app.route('/api/current')
