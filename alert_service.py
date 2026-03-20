@@ -19,6 +19,7 @@ Key behaviors:
 import os
 import time
 import json
+import socket
 import smtplib
 import threading
 import urllib.request
@@ -64,6 +65,7 @@ SILENCE_DURATION_SECONDS = config.getint('alerts', 'silence_duration')
 EMAIL_COOLDOWN_SECONDS   = config.getint('alerts', 'email_cooldown')
 NTP_SYNC_YEAR            = config.getint('system', 'ntp_sync_year')
 MAX_EMAIL_QUEUE          = 100
+HOSTNAME                 = socket.gethostname()
 
 # ---------------------------------------------------------------------------
 # Hardware
@@ -154,7 +156,7 @@ def queue_email(alert_type, sensor_name, current_temp, ignore_cooldown=False, st
             return
 
     prefix  = "[STATUS] " if status_email else "[ALERT] "
-    subject = f"{prefix}IceboxHero {alert_type}: {sensor_name}"
+    subject = f"{prefix}IceboxHero {alert_type}: {sensor_name} [{HOSTNAME}]"
 
     # Only append F unit for numeric readings — status messages pass plain strings
     reading = f"{current_temp}F" if isinstance(current_temp, (int, float)) else current_temp
@@ -163,7 +165,15 @@ def queue_email(alert_type, sensor_name, current_temp, ignore_cooldown=False, st
         f"Event detected for {sensor_name}.\n"
         f"Type: {alert_type}\n"
         f"Current Reading: {reading}\n"
-        f"Time: {time.ctime(now_real)}"
+        f"Time: {time.ctime(now_real)}\n"
+        f"Device: {HOSTNAME}\n"
+        f"\n"
+        f"--\n"
+        f"Diagnostics:\n"
+        f"  journalctl -u icebox-sensor.service -b\n"
+        f"  journalctl -u icebox-alert.service -b\n"
+        f"  cat /run/iceboxhero/telemetry_state.json\n"
+        f"  systemctl status 'icebox-*'"
     )
 
     with queue_lock:
