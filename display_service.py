@@ -281,11 +281,6 @@ def draw_frame(sensor_data, sensor_order, sensor_states, worst_state, is_stale, 
 
 
 # ---------------------------------------------------------------------------
-# Safe JSON reader
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
 
@@ -330,7 +325,7 @@ def _config_error_display(error):
         draw.text((4, BUF_H // 2 + 18), "/data/config/config.ini",
                   fill=(255, 200, 200), font=font)
 
-        push_to_display(img)
+        display.image(img)
         print("CONFIG ERROR frame pushed to display.")
 
     except Exception as disp_err:
@@ -367,6 +362,7 @@ def main():
         buf_width, buf_height = disp_width, disp_height
 
     splash_duration      = config.getint('display', 'splash_duration', fallback=60)
+    temp_critical        = config.getfloat('sampling', 'temp_critical')
     last_ipc_timestamp   = 0
     critical_read_counts = {}
     parse_error_count    = 0   # Consecutive JSON parse failures before alarming
@@ -432,7 +428,9 @@ def main():
 
                     # Detect first real sensor read: timestamp > 0 and at least
                     # one sensor has a non-None value
-                    if not first_real_read and ipc_timestamp > 0 and                        any(v is not None for v in sensor_data.values()):
+                    if not first_real_read and \
+                       ipc_timestamp > 0 and \
+                       any(v is not None for v in sensor_data.values()):
                         first_real_read = True
                         print("First real sensor read received — entering normal display mode.")
 
@@ -441,8 +439,8 @@ def main():
                         last_ipc_timestamp = ipc_timestamp
                         for name, temp in sensor_data.items():
                             if temp is not None:
-                                t = sensor_thresholds.get(name, {})
-                                crit = t.get('critical', 15.0)
+                                t    = sensor_thresholds.get(name, {})
+                                crit = t.get('critical', temp_critical)
                                 if temp >= crit:
                                     critical_read_counts[name] = critical_read_counts.get(name, 0) + 1
                                 else:

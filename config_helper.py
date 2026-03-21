@@ -21,7 +21,7 @@ def get_sensor_configs(config):
     sensors = []
     sensor_sections = sorted(
         [s for s in config.sections() if s.lower().startswith('sensor ')],
-        key=lambda s: s.lower()
+        key=lambda s: int(s.split()[-1])
     )
     for section in sensor_sections:
         sensors.append({
@@ -174,4 +174,13 @@ def load_config(config_path=CONFIG_PATH, template_path=TEMPLATE_PATH):
     return config
 
 
-
+def wait_for_ntp_sync(ntp_sync_year, service_name=''):
+    """Blocks until the system clock year reaches ntp_sync_year.
+    Shared by alert_service and db_logger — avoids duplicate implementations.
+    """
+    label = f" [{service_name}]" if service_name else ""
+    print(f"Checking system clock synchronization...{label}")
+    while time.gmtime().tm_year < ntp_sync_year:
+        print(f"Clock unsynced. Waiting for NTP...{label}")
+        time.sleep(5)
+    print(f"Clock synchronized.{label}")

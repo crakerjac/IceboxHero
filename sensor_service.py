@@ -19,7 +19,7 @@ import os
 import time
 import json
 
-from config_helper import load_config, get_sensor_configs, get_sensor_configs
+from config_helper import load_config, get_sensor_configs
 
 IPC_TEMP_FILE = "/run/iceboxhero/telemetry_state.tmp"
 IPC_FILE      = "/run/iceboxhero/telemetry_state.json"
@@ -89,7 +89,6 @@ def write_ipc_state(sensor_data):
     """Writes the JSON payload atomically to the RAM disk."""
     payload = {
         "timestamp": int(time.time()),
-        "monotonic": time.monotonic(),
         "sensors":   sensor_data
     }
 

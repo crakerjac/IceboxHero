@@ -35,7 +35,7 @@ import shutil
 import threading
 import urllib.request
 from datetime import datetime
-from config_helper import load_config, safe_read_json
+from config_helper import load_config, wait_for_ntp_sync, safe_read_json
 
 # ---------------------------------------------------------------------------
 # Paths and constants
@@ -52,7 +52,7 @@ DB_CORRUPT_FLAG = "/run/iceboxhero/db_corrupted.flag"
 # RAM ↔ SD backup
 # ---------------------------------------------------------------------------
 
-def backup_ram_db_to_disk():
+def backup_ram_db_to_disk(retention_days):
     """Atomically copies the live RAM database to the SD card, then prunes RAM."""
     src = None
     try:
@@ -76,11 +76,13 @@ def backup_ram_db_to_disk():
             print(f"WARNING: Could not write last_backup timestamp: {e}")
 
         # Prune old rows from RAM to prevent unbounded growth on long uptimes
-        config         = load_config()
-        retention_days = config.getint('database', 'retention_days')
+        # retention_days is validated as int at startup — safe to interpolate into SQL modifier
+        if not isinstance(retention_days, int) or retention_days <= 0:
+            raise ValueError(f"Invalid retention_days: {retention_days!r}")
         cursor = src.cursor()
         cursor.execute(
-            f"DELETE FROM readings WHERE timestamp < datetime('now', '-{retention_days} days');"
+            "DELETE FROM readings WHERE timestamp < datetime('now', ?);",
+            (f"-{retention_days} days",)
         )
         src.commit()
 
@@ -127,11 +129,11 @@ def restore_db_from_backup():
             except Exception:
                 pass
 
-def backup_loop(interval_seconds):
+def backup_loop(interval_seconds, retention_days):
     """Background thread: fires backup_ram_db_to_disk() on the configured interval."""
     while True:
         time.sleep(interval_seconds)
-        backup_ram_db_to_disk()
+        backup_ram_db_to_disk(retention_days)
 
 # ---------------------------------------------------------------------------
 # Boot integrity check
@@ -190,18 +192,6 @@ def init_db():
         print("Database schema initialized (WAL mode active).")
     finally:
         conn.close()
-
-# ---------------------------------------------------------------------------
-# NTP gate
-# ---------------------------------------------------------------------------
-
-def wait_for_ntp_sync(ntp_sync_year):
-    """Blocks until the system clock year reaches ntp_sync_year."""
-    print("Checking system clock synchronization for Database Logger...")
-    while time.gmtime().tm_year < ntp_sync_year:
-        print("Clock unsynced. Halting database writes until NTP resolves...")
-        time.sleep(5)
-    print("Clock synchronized. Database logging authorized.")
 
 # ---------------------------------------------------------------------------
 # Telemetry insert
@@ -269,10 +259,11 @@ def main():
     verify_and_recover_db()
     restore_db_from_backup()
     init_db()
-    wait_for_ntp_sync(NTP_SYNC_YEAR)     # Block writes until clock is valid
+    wait_for_ntp_sync(NTP_SYNC_YEAR, "Database Logger")     # Block writes until clock is valid
 
     backup_interval = config.getint('database', 'backup_interval_hours') * 3600
-    backup_thread   = threading.Thread(target=backup_loop, args=(backup_interval,), daemon=True)
+    retention_days  = config.getint('database', 'retention_days')
+    backup_thread   = threading.Thread(target=backup_loop, args=(backup_interval, retention_days), daemon=True)
     backup_thread.start()
 
     heartbeat_url = config.get('network', 'heartbeat_url', fallback='')

@@ -26,7 +26,7 @@ import urllib.request
 from email.message import EmailMessage
 from gpiozero import Buzzer
 import RPi.GPIO as _RPIGPIO
-from config_helper import load_config, safe_read_json, get_sensor_configs
+from config_helper import load_config, safe_read_json, wait_for_ntp_sync, get_sensor_configs
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -198,13 +198,19 @@ def _ping_email_alive():
 
 def process_email_queue():
     """Background thread: sends queued emails every 5 minutes via SMTP SSL."""
-    wait_for_ntp_sync()
+    wait_for_ntp_sync(NTP_SYNC_YEAR, "Alert Service")
 
-    # Fire the boot notification once NTP is confirmed.
-    queue_email("SYSTEM_BOOT", "Monitor", "System Online",
-                ignore_cooldown=True, status_email=True)
-    # Ping email dead-man snitch on boot to confirm pipeline is alive
-    _ping_email_alive()
+    # Fire boot notification once NTP is confirmed.
+    # BOOT_FLAG prevents duplicate emails if the service restarts mid-session.
+    BOOT_FLAG = "/run/iceboxhero/boot_email_sent"
+    if not os.path.exists(BOOT_FLAG):
+        try:
+            open(BOOT_FLAG, 'w').close()
+        except OSError:
+            pass
+        queue_email("SYSTEM_BOOT", "Monitor", "System Online",
+                    ignore_cooldown=True, status_email=True)
+        _ping_email_alive()
 
     smtp_server_addr = config.get('email', 'smtp_server')
     smtp_port        = config.getint('email', 'smtp_port')
@@ -216,10 +222,8 @@ def process_email_queue():
         global email_queue
 
         with queue_lock:
-            items_to_send = list(email_queue) if email_queue else []
-            # Clear items we're about to attempt — new alerts can still be added
-            # to email_queue during the send loop and won't be lost.
-            email_queue = [i for i in email_queue if i not in items_to_send]
+            items_to_send = email_queue[:]
+            email_queue   = []
 
         if items_to_send:
             failed_items = []
@@ -255,25 +259,6 @@ def process_email_queue():
 
 
 
-
-# ---------------------------------------------------------------------------
-# NTP sync gate
-# ---------------------------------------------------------------------------
-
-def wait_for_ntp_sync():
-    """Blocks until the system clock year reaches ntp_sync_year."""
-    print("Checking system clock synchronization...")
-    while time.gmtime().tm_year < NTP_SYNC_YEAR:
-        print("Clock unsynced. Waiting for NTP...")
-        time.sleep(5)
-    print("Clock synchronized.")
-
-
-# ---------------------------------------------------------------------------
-# Safe JSON reader
-# ---------------------------------------------------------------------------
-
-
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
@@ -303,7 +288,7 @@ def main():
         trigger_buzzer = False
 
         # --- Periodic checkin email ---
-        if (time.monotonic() - last_checkin) >= checkin_interval_seconds:
+        if checkin_interval_seconds > 0 and (time.monotonic() - last_checkin) >= checkin_interval_seconds:
             last_checkin = time.monotonic()
             queue_email("CHECKIN", "System",
                         f"IceboxHero is running normally.",
