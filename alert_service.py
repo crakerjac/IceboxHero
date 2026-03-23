@@ -273,10 +273,12 @@ def main():
     last_ipc_timestamp       = 0
     checkin_interval_seconds = config.getint('alerts', 'checkin_interval_days') * 86400
     last_checkin             = time.monotonic()
-    # Grace mode: suppress FAILURE/CRITICAL alerts until the first real sensor
-    # read arrives (IPC timestamp > 0 with at least one non-None value).
-    # This cleanly handles any boot timing without relying on fixed timers.
-    first_real_read = False
+    # Grace mode: suppress alerts for splash_duration seconds after boot,
+    # then enter normal operation unconditionally — sensors may be missing,
+    # slow to start, or the bus may still be settling.
+    splash_duration  = config.getint('display', 'splash_duration', fallback=60)
+    warmup_until     = time.monotonic() + splash_duration
+    first_real_read  = False
 
     while True:
         is_stale      = False
@@ -302,7 +304,7 @@ def main():
         # --- Read IPC state ---
         if os.path.exists(IPC_FILE):
             mtime = os.path.getmtime(IPC_FILE)
-            if (time.time() - mtime) > STALE_THRESHOLD_SECONDS:
+            if first_real_read and (time.time() - mtime) > STALE_THRESHOLD_SECONDS:
                 is_stale       = True
                 trigger_buzzer = True
                 queue_email("CRITICAL_STALE_DATA", "System", "--.-F")
@@ -320,11 +322,17 @@ def main():
                         last_ipc_timestamp = ipc_timestamp
 
                     # --- Detect first real sensor read ---
-                    if not first_real_read and \
-                       ipc_timestamp > 0 and \
-                       any(v is not None for v in sensor_data.values()):
-                        first_real_read = True
-                        print("First real sensor read confirmed — alerts active.")
+                    # Activate on valid sensor data OR once warmup period expires —
+                    # sensors may never produce data (disconnected) but we still
+                    # need to enter normal operation after the grace window.
+                    if not first_real_read:
+                        if (ipc_timestamp > 0 and
+                                any(v is not None for v in sensor_data.values())):
+                            first_real_read = True
+                            print("First real sensor read confirmed — alerts active.")
+                        elif time.monotonic() >= warmup_until:
+                            first_real_read = True
+                            print("Warmup period expired — alerts active.")
 
                     # --- Evaluate temperature alerts ---
                     for name, temp in sensor_data.items():

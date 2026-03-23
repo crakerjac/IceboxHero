@@ -395,6 +395,7 @@ def main():
                         break
             # Exit after maximum splash_duration regardless of sensor state
             if elapsed >= splash_duration:
+                first_real_read = True
                 print(f"Splash duration reached ({splash_duration}s) — entering normal operation.")
                 break
             time.sleep(0.5)
@@ -425,14 +426,6 @@ def main():
                     parse_error_count = 0
                     sensor_data   = payload.get("sensors", {})
                     ipc_timestamp = payload.get("timestamp", 0)
-
-                    # Detect first real sensor read: timestamp > 0 and at least
-                    # one sensor has a non-None value
-                    if not first_real_read and \
-                       ipc_timestamp > 0 and \
-                       any(v is not None for v in sensor_data.values()):
-                        first_real_read = True
-                        print("First real sensor read received — entering normal display mode.")
 
                     # Only update critical counters on a new sensor poll
                     if ipc_timestamp != last_ipc_timestamp:
