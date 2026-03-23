@@ -449,6 +449,8 @@ IceboxHero/
 
 ## Future Enhancements
 
+- **Trend & predictive analysis** (`trend_service.py`) — Use the historical SQLite database to model temperature trends per sensor. Alert when a freezer temperature is rising toward a threshold rather than only after it has been crossed. Recommended approach: collect at least 30 days of baseline data first, then model rate-of-change per sensor. Per-sensor thresholds are already implemented which reduces urgency — a rising trend alert would complement them rather than replace them.
+
 - **Derived state in IPC payload** — Both `alert_service` and `display_service` independently track `critical_read_counts` and `first_real_read` by reading the same IPC file. Since they poll at different intervals (1s vs 500ms), their counts can briefly diverge — the display may show CRITICAL one poll before the buzzer fires, or vice versa. The cleanest fix is to have `sensor_service` write derived state (consecutive critical counts per sensor) directly into the IPC payload. Consumers would then react to state they read rather than state they infer, and display and alert would always be in sync. This would be a meaningful refactor of `sensor_service` and all consumers.
 
 ---
