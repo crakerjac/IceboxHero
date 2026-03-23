@@ -29,7 +29,7 @@ import json
 import time
 import math
 import argparse
-from config_helper import load_config
+from config_helper import load_config, get_sensor_configs
 
 IPC_FILE = "/run/iceboxhero/telemetry_state.json"
 IPC_TEMP = "/run/iceboxhero/telemetry_state.tmp"
@@ -38,10 +38,6 @@ IPC_TEMP = "/run/iceboxhero/telemetry_state.tmp"
 def write_ipc(sensor_data):
     """Atomically writes sensor data to the IPC file.
 
-    Intentionally omits the 'monotonic' field — that field is only valid
-    within the long-running sensor_service.py process. Including a monotonic
-    value from a short-lived mock process would cause alert_service to
-    falsely trigger SYSTEM_FREEZE detection on every run.
     """
     payload = {
         "timestamp": int(time.time()),
@@ -108,7 +104,8 @@ def main():
         pass  # If systemctl isn't available, skip the check silently
 
     # Read sensor names and thresholds from config
-    sensor_names  = list(dict(config.items('sensors')).values())
+    sensor_configs = get_sensor_configs(config)
+    sensor_names   = [s['name'] for s in sensor_configs]
     poll_interval = args.interval if args.interval is not None else config.getint('sampling', 'poll_interval')
     temp_warning  = config.getfloat('sampling', 'temp_warning')
     temp_critical = config.getfloat('sampling', 'temp_critical')
@@ -197,8 +194,8 @@ def main():
 
     except KeyboardInterrupt:
         print("\nMock sensor stopped. IPC file left in place.")
-        print(f"Downstream services will go stale after {config.getint('display', 'stale_timeout')}s.")
-        if poll_interval > config.getint('display', 'stale_timeout'):
+        print(f"Downstream services will go stale after {config.getint('alerts', 'stale_timeout')}s.")
+        if poll_interval > config.getint('alerts', 'stale_timeout'):
             print(f"WARNING: poll interval ({poll_interval}s) exceeds stale_timeout — services may already be stale.")
 
 

@@ -20,7 +20,7 @@ import subprocess
 import shutil
 
 from flask import Flask, jsonify, render_template
-from config_helper import load_config, safe_read_json, get_sensor_configs, get_sensor_configs
+from config_helper import load_config, safe_read_json, get_sensor_configs
 
 app = Flask(__name__)
 

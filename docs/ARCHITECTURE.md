@@ -62,7 +62,6 @@ healthchecks.io heartbeat stops, triggering a dead-man email after its grace per
 | `/run/iceboxhero/db_corrupted.flag` | tmpfs | DB corruption signal to alert_service |
 | `/run/icebox_db/freezer_monitor.db` | tmpfs | Live SQLite database |
 | `/data/config/config.ini` | ext4 | Working config (never committed to git) |
-| `/data/config/alert_state.json` | ext4 | Persistent alert state (checkin email timestamp) |
 | `/data/db/freezer_monitor.db` | ext4 | 4-hour SD card backup of SQLite |
 | `/data/db/last_backup` | ext4 | Timestamp of last successful SD backup |
 | `/opt/iceboxhero/` | read-only overlay | Deployed Python source code |

@@ -81,7 +81,7 @@ Three storage areas with distinct access patterns:
 |---|---|---|
 | `/opt/iceboxhero/` | Read-Only (overlay) | All Python source code and templates |
 | `/run/` | RAM (tmpfs) | IPC state file; live SQLite database |
-| `/data/` | Read-Write (ext4) | SD backup of SQLite; config; alert state |
+| `/data/` | Read-Write (ext4) | SD backup of SQLite; config |
 
 **SD card writes under normal operation:**
 - One full database backup every 4 hours (configurable)
@@ -118,7 +118,7 @@ Emails arrive with one of two subject prefixes to support inbox filtering:
 
 **Recommended Gmail filter:** Subject contains `[STATUS] IceboxHero` → Skip Inbox, Mark as read, Apply label.
 
-The email thread runs independently of the buzzer. If the network is down at alert time, the email is queued in memory and retried every 5 minutes until it succeeds. A periodic checkin email (default: every 30 days) confirms the email pipeline is working during long quiet periods.
+The email thread runs independently of the buzzer. If the network is down at alert time, the email is queued in memory and retried every 5 minutes until it succeeds. A periodic checkin email (default: every 30 days) confirms the system is alive during long uptimes with no reboots. The timer is in-memory — a reboot resets it, which is fine since SYSTEM_BOOT fires on every boot anyway.
 
 ### Silence Button
 
@@ -133,7 +133,7 @@ The Linux hardware watchdog monitors `/run/iceboxhero/telemetry_state.json` for 
 Two independent UUIDs provide visibility into different failure modes:
 
 - **System-alive ping** — Fired after every successful database write (every 5 min). Grace: 15 min. Detects Pi death, power loss, or DB loop crash.
-- **Email-alive ping** — Fired on boot and on each periodic checkin. Grace: 35 days. Detects Gmail credential expiration or SMTP configuration issues.
+- **Email-alive ping** — Fired on boot and on each periodic checkin. Grace: 35 days. Detects Gmail credential expiration or SMTP configuration issues. No persistent state file required.
 
 Both URLs are optional. Leave them as the placeholder value in `config.ini` to disable.
 
@@ -444,6 +444,14 @@ IceboxHero/
     ├── icebox-web.service
     └── icebox-watchdog.service
 ```
+
+---
+
+## Future Enhancements
+
+- **Trend & predictive analysis** (`trend_service.py`) — Use the historical SQLite database to model temperature trends per sensor. Alert when a freezer temperature is rising toward a threshold rather than only after it has been crossed. Recommended approach: collect at least 30 days of baseline data first, then model rate-of-change per sensor. Per-sensor thresholds are already implemented which reduces urgency — a rising trend alert would complement them rather than replace them.
+
+- **Derived state in IPC payload** — Both `alert_service` and `display_service` independently track `critical_read_counts` and `first_real_read` by reading the same IPC file. Since they poll at different intervals (1s vs 500ms), their counts can briefly diverge — the display may show CRITICAL one poll before the buzzer fires, or vice versa. The cleanest fix is to have `sensor_service` write derived state (consecutive critical counts per sensor) directly into the IPC payload. Consumers would then react to state they read rather than state they infer, and display and alert would always be in sync. This would be a meaningful refactor of `sensor_service` and all consumers.
 
 ---
 
