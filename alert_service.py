@@ -201,16 +201,11 @@ def process_email_queue():
     wait_for_ntp_sync(NTP_SYNC_YEAR, "Alert Service")
 
     # Fire boot notification once NTP is confirmed.
-    # BOOT_FLAG prevents duplicate emails if the service restarts mid-session.
-    BOOT_FLAG = "/run/iceboxhero/boot_email_sent"
-    if not os.path.exists(BOOT_FLAG):
-        try:
-            open(BOOT_FLAG, 'w').close()
-        except OSError:
-            pass
-        queue_email("SYSTEM_BOOT", "Monitor", "System Online",
-                    ignore_cooldown=True, status_email=True)
-        _ping_email_alive()
+    # A SYSTEM_BOOT email fires on every service start — if the service restarts
+    # mid-session that is useful information, not noise.
+    queue_email("SYSTEM_BOOT", "Monitor", "System Online",
+                ignore_cooldown=True, status_email=True)
+    _ping_email_alive()
 
     smtp_server_addr = config.get('email', 'smtp_server')
     smtp_port        = config.getint('email', 'smtp_port')
