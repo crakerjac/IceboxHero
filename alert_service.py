@@ -156,7 +156,7 @@ def queue_email(alert_type, sensor_name, current_temp, ignore_cooldown=False, st
             return
 
     prefix  = "[STATUS] " if status_email else "[ALERT] "
-    subject = f"{prefix}IceboxHero {alert_type}: {sensor_name} [{HOSTNAME}]"
+    subject = f"{prefix}IceboxHero {alert_type}: {sensor_name}"
 
     # Only append F unit for numeric readings — status messages pass plain strings
     reading = f"{current_temp}F" if isinstance(current_temp, (int, float)) else current_temp
