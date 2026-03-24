@@ -201,7 +201,17 @@
                 const bkEl = document.getElementById('st-backup');
                 if (data.last_backup) {
                     const d = new Date(data.last_backup);
-                    bkEl.textContent = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+                    const now = new Date();
+                    const isToday = d.toDateString() === now.toDateString();
+                    const isYesterday = d.toDateString() === new Date(now - 86400000).toDateString();
+                    const timeStr = d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+                    if (isToday) {
+                        bkEl.textContent = timeStr;
+                    } else if (isYesterday) {
+                        bkEl.textContent = 'Yesterday ' + timeStr;
+                    } else {
+                        bkEl.textContent = d.toLocaleDateString([], {month: 'short', day: 'numeric'}) + ' ' + timeStr;
+                    }
                     bkEl.title = data.last_backup;
                     const hoursAgo = (Date.now() - d) / 3600000;
                     bkEl.className = hoursAgo > 8 ? 'stat-value stat-warn' : 'stat-value';
