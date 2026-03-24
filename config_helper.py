@@ -8,15 +8,19 @@ def get_sensor_configs(config):
     """Parse all [sensor N] sections and return a list of sensor config dicts.
 
     Each dict contains:
-        id       — DS18B20 ROM ID (e.g. 28-00000071c774)
-        name     — friendly display name (e.g. Big Freezer)
-        warning  — warning threshold in °F (falls back to [sampling] temp_warning)
-        critical — critical threshold in °F (falls back to [sampling] temp_critical)
+        id                   — DS18B20 ROM ID (e.g. 28-00000071c774)
+        name                 — friendly display name (e.g. Big Freezer)
+        warning              — warning threshold in °F (falls back to [sampling] temp_warning)
+        critical             — critical threshold in °F (falls back to [sampling] temp_critical)
+        alert_holdoff_reads  — consecutive reads above threshold before alerting;
+                               derived from alert_holdoff_minutes and poll_interval
 
     Sensors are returned in section order (sensor 1, sensor 2, ...).
     """
-    global_warning  = config.getfloat('sampling', 'temp_warning')
-    global_critical = config.getfloat('sampling', 'temp_critical')
+    global_warning       = config.getfloat('sampling', 'temp_warning')
+    global_critical      = config.getfloat('sampling', 'temp_critical')
+    global_holdoff_mins  = config.getfloat('alerts',   'alert_holdoff_minutes', fallback=5.0)
+    poll_interval        = config.getint('sampling',   'poll_interval')
 
     sensors = []
     sensor_sections = sorted(
@@ -24,11 +28,14 @@ def get_sensor_configs(config):
         key=lambda s: int(s.split()[-1])
     )
     for section in sensor_sections:
+        holdoff_mins  = config.getfloat(section, 'alert_holdoff_minutes', fallback=global_holdoff_mins)
+        holdoff_reads = max(1, round(holdoff_mins * 60 / poll_interval))
         sensors.append({
-            'id':       config.get(section, 'id').strip(),
-            'name':     config.get(section, 'name').strip(),
-            'warning':  config.getfloat(section, 'warning',  fallback=global_warning),
-            'critical': config.getfloat(section, 'critical', fallback=global_critical),
+            'id':                  config.get(section, 'id').strip(),
+            'name':                config.get(section, 'name').strip(),
+            'warning':             config.getfloat(section, 'warning',  fallback=global_warning),
+            'critical':            config.getfloat(section, 'critical', fallback=global_critical),
+            'alert_holdoff_reads': holdoff_reads,
         })
     return sensors
 

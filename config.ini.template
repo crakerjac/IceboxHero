@@ -44,6 +44,7 @@ id = 28-00000xxxxxxx
 name = Big Freezer
 warning = 10.0
 critical = 15.0
+alert_holdoff_minutes = 5
 
 # Add more sensors by copying the block above and incrementing the number:
 # [sensor 2]
@@ -68,6 +69,9 @@ y_offset = 0
 [alerts]
 # Seconds before IPC file age triggers STALE DATA alert
 stale_timeout = 600
+# Minutes of consecutive readings above threshold before WARNING or CRITICAL alert fires.
+# Per-sensor override available via alert_holdoff_minutes in each [sensor N] section.
+alert_holdoff_minutes = 5
 silence_duration = 3600
 email_cooldown = 3600
 # How often to send a periodic checkin email confirming the system and

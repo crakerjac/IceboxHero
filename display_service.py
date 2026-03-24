@@ -129,12 +129,15 @@ def push_to_display(image):
 # State evaluation
 # ---------------------------------------------------------------------------
 
-def evaluate_sensor_states(sensor_data, is_stale, sensor_thresholds, critical_counts):
+def evaluate_sensor_states(sensor_data, is_stale, sensor_thresholds,
+                            critical_counts, warning_counts):
     """Returns per-sensor state dict: {sensor_name: "NORMAL"|"WARNING"|"CRITICAL"}
     Also returns overall worst state for stale/error handling.
+
+    Both WARNING and CRITICAL require alert_holdoff_reads consecutive reads above
+    threshold before changing state — prevents brief door-open spikes from triggering.
     """
     if is_stale:
-        # All sensors show CRITICAL on stale data
         return {name: "CRITICAL" for name in sensor_data}, "CRITICAL"
 
     states = {}
@@ -142,16 +145,17 @@ def evaluate_sensor_states(sensor_data, is_stale, sensor_thresholds, critical_co
 
     for name, temp in sensor_data.items():
         thresholds    = sensor_thresholds.get(name, {})
-        temp_warning  = thresholds.get('warning',  10.0)
-        temp_critical = thresholds.get('critical', 15.0)
+        temp_warning  = thresholds.get('warning',             10.0)
+        temp_critical = thresholds.get('critical',            15.0)
+        holdoff       = thresholds.get('alert_holdoff_reads', 5)
 
         if temp is None:
             states[name] = "CRITICAL"
             worst = "CRITICAL"
-        elif temp >= temp_critical and critical_counts.get(name, 0) >= 2:
+        elif temp >= temp_critical and critical_counts.get(name, 0) >= holdoff:
             states[name] = "CRITICAL"
             worst = "CRITICAL"
-        elif temp >= temp_warning:
+        elif temp >= temp_warning and warning_counts.get(name, 0) >= holdoff:
             states[name] = "WARNING"
             if worst == "NORMAL":
                 worst = "WARNING"
@@ -347,8 +351,11 @@ def main():
     init_display(config)
     sensor_configs    = get_sensor_configs(config)
     sensor_order      = [s['name'] for s in sensor_configs]
-    sensor_thresholds = {s['name']: {'warning': s['warning'], 'critical': s['critical']}
-                         for s in sensor_configs}
+    sensor_thresholds = {s['name']: {
+                             'warning':             s['warning'],
+                             'critical':            s['critical'],
+                             'alert_holdoff_reads': s['alert_holdoff_reads'],
+                         } for s in sensor_configs}
     refresh_rate  = config.getfloat('display', 'refresh_rate')
     stale_timeout = config.getint('alerts', 'stale_timeout')
     disp_width    = config.getint('display', 'width')
@@ -365,6 +372,7 @@ def main():
     temp_critical        = config.getfloat('sampling', 'temp_critical')
     last_ipc_timestamp   = 0
     critical_read_counts = {}
+    warning_read_counts  = {}
     parse_error_count    = 0   # Consecutive JSON parse failures before alarming
     # Grace mode: hold neutral display state until the first real sensor read
     # arrives (IPC timestamp > 0). This prevents false CRITICAL flashes between
@@ -432,18 +440,25 @@ def main():
                         last_ipc_timestamp = ipc_timestamp
                         for name, temp in sensor_data.items():
                             if temp is not None:
-                                t    = sensor_thresholds.get(name, {})
-                                crit = t.get('critical', temp_critical)
+                                t       = sensor_thresholds.get(name, {})
+                                warn    = t.get('warning',  10.0)
+                                crit    = t.get('critical', 15.0)
                                 if temp >= crit:
                                     critical_read_counts[name] = critical_read_counts.get(name, 0) + 1
+                                    warning_read_counts[name]  = 0
+                                elif temp >= warn:
+                                    critical_read_counts[name] = 0
+                                    warning_read_counts[name]  = warning_read_counts.get(name, 0) + 1
                                 else:
                                     critical_read_counts[name] = 0
-                            # None reading: leave counter unchanged — a dead sensor
+                                    warning_read_counts[name]  = 0
+                            # None reading: leave counters unchanged — a dead sensor
                             # during an active critical condition should not reset the alarm
 
                     if first_real_read:
                         sensor_states, state = evaluate_sensor_states(
-                            sensor_data, is_stale, sensor_thresholds, critical_read_counts
+                            sensor_data, is_stale, sensor_thresholds,
+                            critical_read_counts, warning_read_counts
                         )
 
             except (json.JSONDecodeError, KeyError):
