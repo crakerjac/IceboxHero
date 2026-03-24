@@ -25,11 +25,13 @@ Integrity / NTP gates:
   - Writes are blocked until the system clock year >= ntp_sync_year to prevent
     1970-epoch timestamps being written to the database.
   - A heartbeat ping fires after each successful 5-minute write to healthchecks.io.
+  - SIGTERM handler triggers a final backup before exit — no data lost on clean shutdown/reboot.
 """
 
 import os
 import json
 import time
+import signal
 import sqlite3
 import shutil
 import threading
@@ -267,6 +269,16 @@ def main():
     backup_thread.start()
 
     heartbeat_url = config.get('network', 'heartbeat_url', fallback='')
+
+    # Register SIGTERM handler for clean shutdown — triggers a final SD backup
+    # so no data is lost when the service is stopped for reboot or OTA update.
+    def _shutdown_handler(signum, frame):
+        print("SIGTERM received — running final database backup before exit.")
+        backup_ram_db_to_disk(retention_days)
+        print("Final backup complete. Exiting.")
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, _shutdown_handler)
 
     while True:
         loop_start = time.monotonic()
