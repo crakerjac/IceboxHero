@@ -103,6 +103,7 @@ critical_read_counts    = {}  # {"sensor_name": consecutive_critical_count}
 sensor_failed_state     = {}  # {"sensor_name": bool} — True while sensor is reporting None
 sensor_warning_state    = {}  # {"sensor_name": bool} — True while sensor is in warning zone
 sensor_none_counts      = {}  # {"sensor_name": int} — consecutive None read count
+sensor_warning_counts   = {}  # {"sensor_name": int} — consecutive warning read count
 
 
 # ---------------------------------------------------------------------------
@@ -263,8 +264,11 @@ def main():
 
     # Build per-sensor threshold lookup: {name: {warning, critical}}
     sensor_configs   = get_sensor_configs(config)
-    sensor_thresholds = {s['name']: {'warning': s['warning'], 'critical': s['critical']}
-                         for s in sensor_configs}
+    sensor_thresholds = {s['name']: {
+                             'warning':             s['warning'],
+                             'critical':            s['critical'],
+                             'alert_holdoff_reads': s['alert_holdoff_reads'],
+                         } for s in sensor_configs}
 
     email_thread = threading.Thread(target=process_email_queue, daemon=True)
     email_thread.start()
@@ -364,22 +368,26 @@ def main():
                                 sensor_warning_state[name] = False
                                 queue_email("RECOVERED", name, temp, status_email=True)
 
+                            holdoff   = thresholds.get('alert_holdoff_reads', 5)
                             if temp >= temp_critical:
                                 if is_new_read:
                                     critical_read_counts[name] = critical_read_counts.get(name, 0) + 1
-                                    if critical_read_counts[name] >= 2:
+                                    if critical_read_counts[name] >= holdoff:
                                         queue_email("CRITICAL", name, temp)
-                                if critical_read_counts.get(name, 0) >= 2:
+                                if critical_read_counts.get(name, 0) >= holdoff:
                                     trigger_buzzer = True
                             else:
                                 if is_new_read:
                                     critical_read_counts[name] = 0
                                     if temp >= temp_warning:
-                                        # Only email on transition INTO warning state
-                                        if not sensor_warning_state.get(name, False):
+                                        sensor_warning_counts[name] = sensor_warning_counts.get(name, 0) + 1
+                                        # Only email on transition INTO confirmed warning state
+                                        if sensor_warning_counts[name] >= holdoff and \
+                                           not sensor_warning_state.get(name, False):
                                             sensor_warning_state[name] = True
                                             queue_email("WARNING", name, temp)
                                     else:
+                                        sensor_warning_counts[name] = 0
                                         sensor_warning_state[name] = False
 
             except (json.JSONDecodeError, KeyError):

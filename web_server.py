@@ -8,7 +8,7 @@ Two data sources:
   - /api/status   → system health metrics including watchdog state
 
 The dashboard JS polls /api/current every 30 seconds and /api/history + /api/status
-every 5 minutes. Chart.js must be downloaded and placed at static/chart.min.js —
+every 5 minutes; /api/status every 60 seconds. Chart.js must be downloaded and placed at static/chart.min.js —
 the dashboard is designed to work without any internet connectivity.
 """
 
@@ -55,7 +55,6 @@ try:
 except Exception as e:
     print(f"FATAL: config load failed: {e}")
     raise
-
 
 
 def get_current_state():
