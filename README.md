@@ -10,13 +10,16 @@ A self-contained, fault-tolerant freezer temperature monitoring system built on 
 
 - Continuous DS18B20 temperature monitoring via 1-Wire bus
 - Per-sensor configurable temperature thresholds — each freezer has its own warning and critical levels
+- Configurable alert holdoff — WARNING and CRITICAL require sustained readings before alerting, preventing door-open spikes from triggering false alarms
 - Local ST7735S LCD display with per-sensor color-coded status and 1 Hz critical flashing
+- Boot splash screen suppresses false alerts during startup
 - Piezo buzzer alarm with hardware silence button
 - Email alerts (Gmail/SMTP) with in-memory retry queue — survives network outages
 - External uptime monitoring via [healthchecks.io](https://healthchecks.io) dead-man's snitch
-- SQLite database lives in RAM; backs up to SD card every 4 hours
+- SQLite database lives in RAM; backs up to SD card every 4 hours — final backup triggered on clean shutdown
 - Read-only root filesystem — SD card protected against power-loss corruption
 - Hardware watchdog forces a reboot if the sensor service hangs
+- Network watchdog detects wifi stack failures — restarts NetworkManager, then reboots (up to 3 times) before falling back to NM-only retries; state persisted in `/data/config/system_state.json`
 - Flask web dashboard with 24-hour temperature graph, served entirely from local storage
 - All behavior tunable via `config.ini` — no code changes required
 
@@ -53,7 +56,7 @@ All pins are configurable in `config.ini`.
 
 ## System Architecture
 
-Seven modules make up the full system. Module 0 (`config_helper.py`) is a shared library imported by all services — it is not a running process. Module 1 covers the OS layer: systemd units, tmpfiles.d, watchdog config, and the data mount. Modules 2–6 are independent long-running services that communicate exclusively through shared files on the RAM disk (`/run`). No service calls another directly — a crash in any single service does not affect the others. systemd restarts each service independently.
+Eight modules make up the full system. Module 0 (`config_helper.py`) is a shared library imported by all services — it is not a running process. Module 1 covers the OS layer: systemd units, tmpfiles.d, watchdog config, and the data mount. Modules 2–6 are independent long-running services that communicate exclusively through shared files on the RAM disk (`/run`). No service calls another directly — a crash in any single service does not affect the others. systemd restarts each service independently.
 
 <p align="center"><img src="docs/architecture-overview.png" alt="System Architecture Diagram"></p>
 
@@ -100,12 +103,12 @@ Each sensor is evaluated independently against its own configured thresholds. Th
 | State | Condition | LCD | Buzzer | Email |
 |---|---|---|---|---|
 | Normal | Below warning threshold | White on Black | Off | — |
-| Warning | ≥ warning threshold | Black on Yellow | Off | Yes (60-min cooldown) |
-| Critical | ≥ critical threshold, 2 consecutive reads | Flashing White/Red @ 1 Hz | On | Yes (60-min cooldown) |
+| Warning | ≥ warning threshold for `alert_holdoff_minutes` | Black on Yellow | Off | Yes (60-min cooldown) |
+| Critical | ≥ critical threshold for `alert_holdoff_minutes` | Flashing White/Red @ 1 Hz | On | Yes (60-min cooldown) |
 | Missing Sensor | 3 consecutive None reads | `--.-F`, flashing red | On | Yes |
 | Stale Data | IPC file > 10 min old | `STALE DATA`, flashing | On | Yes |
 
-Default thresholds (configurable per sensor in `config.ini`): warning = 10°F, critical = 15°F.
+Default thresholds (configurable per sensor in `config.ini`): warning = 10°F, critical = 15°F, holdoff = 5 minutes.
 
 > **Note:** The hardware watchdog reboots the Pi after 180 seconds of stale IPC data — well before the 10-minute STALE DATA display threshold is reached. The STALE DATA state is a second line of defence for the unlikely scenario where the watchdog daemon itself fails.
 
@@ -265,13 +268,14 @@ Each sensor gets its own `[sensor N]` section in `config.ini`. Thresholds are pe
 
 ```ini
 [sensor 1]
-id = 28-xxxxxxxxxxxx    # ROM ID from /sys/bus/w1/devices/
-name = Big Freezer      # Display name — shown on LCD and web dashboard
-warning = 10.0          # °F — steady yellow on display, email alert
-critical = 15.0         # °F — flashing red on display, buzzer, email alert
+id = 28-xxxxxxxxxxxx           # ROM ID from /sys/bus/w1/devices/
+name = Big Freezer             # Display name — shown on LCD and web dashboard
+warning = 10.0                 # °F — yellow on display, email alert
+critical = 15.0                # °F — flashing red, buzzer, email alert
+alert_holdoff_minutes = 5      # Minutes of sustained threshold crossing before alerting
 ```
 
-If `warning` or `critical` are omitted from a sensor section, the global defaults from `[sampling]` are used as fallback.
+If `warning`, `critical`, or `alert_holdoff_minutes` are omitted, the global defaults from `[sampling]` and `[alerts]` are used as fallback.
 
 ---
 
@@ -396,6 +400,12 @@ journalctl -u icebox-db.service -n 50     # last 50 lines
 # Check current sensor readings
 cat /run/iceboxhero/telemetry_state.json
 
+# Check network watchdog log
+cat /data/logs/network_watchdog.log
+
+# Check persistent system state (network watchdog counters)
+cat /data/config/system_state.json
+
 # Check RAM disk usage
 df -h /run
 
@@ -436,13 +446,16 @@ IceboxHero/
 │   ├── architecture-overview.png  # Data flow diagram — displayed in README
 │   ├── architecture-full.png      # Full module diagram — displayed in ARCHITECTURE.md
 │   └── ARCHITECTURE.md            # Full design notes, runtime paths, watchdog detail
+├── network_watchdog.sh          # Network stack watchdog — 3+3 retry logic, system_state.json
 └── systemd/
     ├── icebox-sensor.service
     ├── icebox-display.service
     ├── icebox-alert.service
     ├── icebox-db.service
     ├── icebox-web.service
-    └── icebox-watchdog.service
+    ├── icebox-watchdog.service
+    ├── icebox-netwatchdog.service
+    └── icebox-netwatchdog.timer
 ```
 
 ---

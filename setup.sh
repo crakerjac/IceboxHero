@@ -283,6 +283,13 @@ for f in start_services.sh stop_services.sh update.sh; do
     fi
 done
 
+# Network watchdog runs as root — needs root ownership
+if [[ -f "${SCRIPT_DIR}/network_watchdog.sh" ]]; then
+    install -m 755 -o root -g root \
+        "${SCRIPT_DIR}/network_watchdog.sh" "/opt/iceboxhero/network_watchdog.sh"
+    success "Deployed: network_watchdog.sh"
+fi
+
 # Python modules
 for f in config_helper.py sensor_service.py display_service.py \
           alert_service.py db_logger.py web_server.py mock_sensors.py display_test.py; do
@@ -499,6 +506,8 @@ SERVICES=(
     icebox-db.service
     icebox-web.service
     icebox-watchdog.service
+    icebox-netwatchdog.service
+    icebox-netwatchdog.timer
 )
 
 for svc in "${SERVICES[@]}"; do
@@ -608,7 +617,7 @@ echo  "  ✓ /data directory structure created"
 echo  "  ✓ Watchdog daemon configured (auto-armed at boot by icebox-watchdog.service)"
 echo  "  ✓ tmpfiles.d configured (/run/iceboxhero and /run/icebox_db created, pi-owned)"
 echo  "  ✓ logrotate configured"
-echo  "  ✓ Five systemd services installed and enabled"
+echo  "  ✓ Six systemd services + network watchdog timer installed and enabled"
 echo ""
 echo -e "${BOLD}${YEL}Required manual steps before the system will run:${RST}"
 echo ""

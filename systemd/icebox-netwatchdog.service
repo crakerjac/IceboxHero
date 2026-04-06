@@ -1,0 +1,9 @@
+[Unit]
+Description=IceboxHero — Network Watchdog
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/iceboxhero/network_watchdog.sh
+StandardOutput=journal
+StandardError=journal
