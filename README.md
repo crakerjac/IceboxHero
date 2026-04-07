@@ -20,7 +20,7 @@ A self-contained, fault-tolerant freezer temperature monitoring system built on 
 - Read-only root filesystem — SD card protected against power-loss corruption
 - Hardware watchdog forces a reboot if the sensor service hangs
 - Network watchdog detects wifi stack failures — restarts NetworkManager, then reboots (up to 3 times) before falling back to NM-only retries; state persisted in `/data/config/system_state.json`
-- Flask web dashboard with 24-hour temperature graph, served entirely from local storage
+- Flask web dashboard with 24-hour temperature graph and one-click log download, served entirely from local storage
 - All behavior tunable via `config.ini` — no code changes required
 
 ---
@@ -400,11 +400,14 @@ journalctl -u icebox-db.service -n 50     # last 50 lines
 # Check current sensor readings
 cat /run/iceboxhero/telemetry_state.json
 
-# Check network watchdog log
-cat /data/logs/network_watchdog.log
+# Check saved boot logs (last 3 boots)
+ls /data/logs/icebox_boot_*.log
 
 # Check persistent system state (network watchdog counters)
 cat /data/config/system_state.json
+
+# Or download all logs from the web dashboard:
+# http://iceboxhero.local:8080  →  Download Logs button
 
 # Check RAM disk usage
 df -h /run
@@ -447,6 +450,7 @@ IceboxHero/
 │   ├── architecture-full.png      # Full module diagram — displayed in ARCHITECTURE.md
 │   └── ARCHITECTURE.md            # Full design notes, runtime paths, watchdog detail
 ├── network_watchdog.sh          # Network stack watchdog — 3+3 retry logic, system_state.json
+├── log_flush.sh                 # Dumps journal to /data/logs on clean shutdown/reboot
 └── systemd/
     ├── icebox-sensor.service
     ├── icebox-display.service
@@ -455,7 +459,8 @@ IceboxHero/
     ├── icebox-web.service
     ├── icebox-watchdog.service
     ├── icebox-netwatchdog.service
-    └── icebox-netwatchdog.timer
+    ├── icebox-netwatchdog.timer
+    └── icebox-logflush.service
 ```
 
 ---

@@ -19,7 +19,8 @@ import time
 import subprocess
 import shutil
 
-from flask import Flask, jsonify, render_template
+import glob
+from flask import Flask, jsonify, render_template, Response
 from config_helper import load_config, safe_read_json, get_sensor_configs
 
 app = Flask(__name__)
@@ -36,6 +37,7 @@ def _read_version():
 VERSION = _read_version()   # Cached at startup — no file I/O on each request
 
 IPC_FILE = "/run/iceboxhero/telemetry_state.json"
+LOG_DIR  = "/data/logs"
 DB_FILE  = "/run/icebox_db/freezer_monitor.db"   # Live RAM database
 
 # Load config at module level — web_server is a long-running process and
@@ -170,6 +172,7 @@ def get_system_status():
     return status
 
 
+
 @app.route('/')
 def index():
     """Serves the main dashboard, injecting threshold values from config."""
@@ -196,6 +199,56 @@ def api_history():
 def api_status():
     """Returns system health metrics including watchdog state."""
     return jsonify(get_system_status())
+
+
+@app.route('/api/logs')
+def api_logs():
+    """Returns a plain text download of current boot journal + last 2 saved boot logs."""
+    lines = []
+
+    # Header
+    lines.append("=" * 60)
+    lines.append("IceboxHero Diagnostic Logs")
+    lines.append(f"Downloaded: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"Version:    {VERSION}")
+    lines.append("=" * 60)
+    lines.append("")
+
+    # Current boot — live journal
+    lines.append("=" * 60)
+    lines.append("CURRENT BOOT (live journal)")
+    lines.append("=" * 60)
+    for svc in ['icebox-sensor', 'icebox-display', 'icebox-alert',
+                'icebox-db', 'icebox-web', 'icebox-watchdog', 'icebox-netwatchdog']:
+        lines.append(f"\n--- {svc}.service ---")
+        try:
+            result = subprocess.run(
+                ['journalctl', '-u', f'{svc}.service', '-b', '--no-pager'],
+                capture_output=True, text=True, timeout=10
+            )
+            lines.append(result.stdout or '(no entries)')
+        except Exception as e:
+            lines.append(f'(error: {e})')
+
+    # Saved boot logs from /data/logs — newest first, up to 2
+    saved = sorted(glob.glob(os.path.join(LOG_DIR, 'icebox_boot_*.log')), reverse=True)[:2]
+    for path in saved:
+        lines.append("")
+        lines.append("=" * 60)
+        lines.append(f"SAVED BOOT LOG: {os.path.basename(path)}")
+        lines.append("=" * 60)
+        try:
+            with open(path) as f:
+                lines.append(f.read())
+        except Exception as e:
+            lines.append(f'(error reading file: {e})')
+
+    output = "\n".join(lines)
+    return Response(
+        output,
+        mimetype='text/plain',
+        headers={'Content-Disposition': 'attachment; filename=iceboxhero_logs.txt'}
+    )
 
 
 if __name__ == '__main__':

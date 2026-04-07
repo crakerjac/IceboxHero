@@ -5,7 +5,7 @@
 # Use this to test setup.sh repeatedly without reimaging the SD card.
 #
 # What this script removes:
-#   - All five systemd services (stopped, disabled, unit files deleted)
+#   - All systemd services (stopped, disabled, unit files deleted)
 #   - Weekly CRON job for database maintenance
 #   - logrotate configuration
 #   - /etc/tmpfiles.d/iceboxhero.conf (runtime directory config)
@@ -74,6 +74,8 @@ SERVICES=(
     icebox-db.service
     icebox-web.service
     icebox-watchdog.service
+    icebox-netwatchdog.timer
+    icebox-logflush.service
 )
 
 for svc in "${SERVICES[@]}"; do
@@ -119,6 +121,7 @@ header "Removing CRON Job"
 EXISTING_CRON=$(crontab -u "${REAL_USER}" -l 2>/dev/null || true)
 if echo "${EXISTING_CRON}" | grep -q "db_maintenance.py"; then
     echo "${EXISTING_CRON}" | grep -v "db_maintenance.py" | crontab -u "${REAL_USER}" -
+    # Note: db_maintenance.py CRON job removed in v0.3.0 — pruning now handled by db_logger.py
     success "CRON job removed for user: ${REAL_USER}"
 else
     info "CRON job not found — skipping"
@@ -174,6 +177,11 @@ if [[ -f /data/config/config.ini ]]; then
     success "Removed: /data/config/config.ini"
 else
     info "Not found — skipping"
+fi
+
+if [[ -f /data/config/system_state.json ]]; then
+    rm /data/config/system_state.json
+    success "Removed: /data/config/system_state.json"
 fi
 
 # =============================================================================
@@ -278,7 +286,7 @@ echo -e "${BOLD}${GRN}  Teardown complete.${RST}"
 echo -e "${BOLD}${GRN}============================================================${RST}"
 echo ""
 echo -e "${BOLD}What was removed:${RST}"
-echo  "  ✓ All five systemd services stopped, disabled, and deleted"
+echo  "  ✓ All systemd services stopped, disabled, and deleted"
 echo  "  ✓ Weekly CRON job removed"
 echo  "  ✓ logrotate configuration removed"
 echo  "  ✓ /etc/tmpfiles.d/iceboxhero.conf removed"

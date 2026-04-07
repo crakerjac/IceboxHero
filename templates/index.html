@@ -16,6 +16,9 @@
         .status-critical{ color: #f44336; }
         .chart-container{ background-color: #1e1e1e; padding: 20px; border-radius: 8px; height: 400px; }
         .footer         { margin-top: 30px; text-align: center; font-size: 0.75em; color: #555; }
+        .log-btn        { margin-left: 16px; background: none; border: 1px solid #444; color: #888;
+                          font-size: 0.75em; padding: 3px 10px; border-radius: 4px; cursor: pointer; }
+        .log-btn:hover  { color: #ccc; border-color: #888; }
         .watchdog       { margin-left: 14px; }
         .wd-active      { color: #4caf50; }
         .wd-inactive    { color: #f44336; }
@@ -33,6 +36,8 @@
         .stat-value     { font-size: 1.1em; color: #ccc; margin-top: 2px; }
         .stat-warn      { color: #ffeb3b; }
         .stat-crit      { color: #f44336; }
+        .dl-btn         { background: #2a2a2a; border: 1px solid #444; color: #aaa; padding: 6px 14px; border-radius: 4px; font-size: 0.8em; cursor: pointer; text-decoration: none; display: inline-block; margin-top: 8px; }
+        .dl-btn:hover   { background: #333; color: #fff; }
 
         @media (max-width: 768px) {
             body            { padding: 12px; }
@@ -71,6 +76,8 @@
 
 <div class="footer">
     <span id="watchdog-status" class="watchdog wd-unknown">&#9679; Watchdog: checking...</span>
+    &nbsp;&nbsp;
+    <a class="dl-btn" href="/api/logs" download>&#8681; Download Logs</a>
 </div>
 
 <script>

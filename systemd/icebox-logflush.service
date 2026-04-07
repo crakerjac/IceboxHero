@@ -1,0 +1,18 @@
+[Unit]
+Description=IceboxHero — Log Flush on Shutdown
+# Runs at startup (no-op) and on shutdown (saves journal to /data/logs)
+DefaultDependencies=no
+After=multi-user.target
+Before=shutdown.target reboot.target halt.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+ExecStop=/opt/iceboxhero/log_flush.sh
+StandardOutput=journal
+StandardError=journal
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

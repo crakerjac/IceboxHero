@@ -10,20 +10,19 @@
 #   - After 3 reboots with no recovery → stop rebooting, retry NM only
 #     (healthchecks.io dead-man will fire naturally)
 #
-# State is persisted in /data/config/system_state.json so counts survive reboots.
-# All actions logged to /data/logs/network_watchdog.log
+# Noteworthy events logged to journald (captured to SD on shutdown by icebox-logflush.service).
+# Persistent counters stored in /data/config/system_state.json.
 
-LOG_FILE="/data/logs/network_watchdog.log"
 STATE_FILE="/data/config/system_state.json"
 PING_COUNT=3
 PING_TIMEOUT=5
 NM_WAIT=30
 NM_FAIL_THRESHOLD=3    # Consecutive failed checks before restarting NM
-REBOOT_FAIL_THRESHOLD=3  # Consecutive NM restarts before rebooting
 MAX_REBOOTS=3          # Max network-triggered reboots before giving up
 
 log() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') network_watchdog: $*" >> "${LOG_FILE}"
+    # Log to journald — captured to SD on clean shutdown by icebox-logflush.service
+    logger -t "network_watchdog" "$*"
 }
 
 # Read a value from system_state.json — returns 0 if missing or unreadable
