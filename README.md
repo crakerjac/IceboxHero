@@ -56,23 +56,24 @@ All pins are configurable in `config.ini`.
 
 ## System Architecture
 
-Eight modules make up the full system. Module 0 (`config_helper.py`) is a shared library imported by all services — it is not a running process. Module 1 covers the OS layer: systemd units, tmpfiles.d, watchdog config, and the data mount. Modules 2–6 are independent long-running services that communicate exclusively through shared files on the RAM disk (`/run`). No service calls another directly — a crash in any single service does not affect the others. systemd restarts each service independently.
+Eight modules make up the full system. Module 0 (`config_helper.py`) is a shared library imported by all services — it is not a running process. Module 1 covers the OS layer: systemd units, tmpfiles.d, watchdog config, and the data mount. Modules 2–7 are independent long-running services that communicate exclusively through shared files on the RAM disk (`/run`). No service calls another directly — a crash in any single service does not affect the others. systemd restarts each service independently.
 
 <p align="center"><img src="docs/architecture-overview.png" alt="System Architecture Diagram"></p>
 
-> Modules 0 and 1 are cross-cutting infrastructure — `config_helper.py` is imported by every service; the systemd units and watchdog underpin all six. They are intentionally omitted from the data-flow diagram above. For full design notes see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+> Modules 0 and 1 are cross-cutting infrastructure — `config_helper.py` is imported by every service; the systemd units and watchdog underpin all seven. They are intentionally omitted from the data-flow diagram above. For full design notes see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ### Module Summary
 
 | Module | File(s) | Role |
 |---|---|---|
 | 0 — Configuration | `config_helper.py`, `config.ini` | Shared config parser, sensor config, and JSON utility |
-| 1 — OS & Services | `systemd/*.service`, `watchdog.conf` | Filesystem layout, watchdog, systemd units |
+| 1 — OS & Services | `systemd/*.service`, `watchdog.conf`, `log_flush.sh` | Filesystem layout, watchdog, systemd units, shutdown log flush |
 | 2 — Sensor Acquisition | `sensor_service.py` | DS18B20 1-Wire reads; atomic IPC file writer |
 | 3 — Display | `display_service.py` | ST7735S LCD driver; per-sensor color-coded status |
 | 4 — Alerts & Email | `alert_service.py` | Buzzer control, GPIO silence button, SMTP retry queue |
 | 5 — Database Logger | `db_logger.py` | RAM SQLite DB; 4-hour SD backup; automatic pruning |
 | 6 — Web Server | `web_server.py`, `templates/index.html` | Flask REST API; 24-hour graph dashboard |
+| 7 — Network Watchdog | `network_watchdog.sh`, `system_state.json` | Network stack monitor; handles wifi auto-recovery, NM restarts, and hardware reboots |
 
 ---
 
