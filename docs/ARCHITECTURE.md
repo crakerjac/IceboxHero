@@ -32,17 +32,21 @@ systemd, or any Python process. The 180s window = 60s poll interval + conversion
 time + scheduler jitter + 2x safety margin.
 
 ### Per-sensor thresholds
-Each sensor has independently configurable warning and critical thresholds in
-`config.ini`. The display renders each sensor's half of the screen in its own
-state color. The buzzer fires if any sensor is in a critical or failure state.
+Each sensor has independently configurable warning, critical, and alert holdoff
+thresholds in `config.ini`. The display renders each sensor's half of the screen
+in its own state color. Both WARNING and CRITICAL require sustained readings above
+threshold for `alert_holdoff_minutes` before alerting — preventing door-open spikes
+from triggering false alarms. The buzzer fires if any sensor is in a confirmed
+critical or failure state.
 
 ### Fault isolation
 ```
-sensor_service crash  → display shows STALE DATA, alert emails, watchdog reboots
-display_service crash → temperatures still logged, alerts still fire, web still works
-alert_service crash   → temperatures still logged, display still updates
-db_logger crash       → display and alerts still work, history lost until restart
-web_server crash      → all monitoring continues, dashboard temporarily unavailable
+sensor_service crash   → display shows STALE DATA, alert emails, watchdog reboots
+display_service crash  → temperatures still logged, alerts still fire, web still works
+alert_service crash    → temperatures still logged, display still updates
+db_logger crash        → display and alerts still work, history lost until restart
+web_server crash       → all monitoring continues, dashboard temporarily unavailable
+network_watchdog crash → wifi auto-recovery stops, but all local monitoring, display, and logging continues uninterrupted
 ```
 
 ### Config error handling
@@ -70,6 +74,11 @@ healthchecks.io heartbeat stops, triggering a dead-man email after its grace per
 | `/etc/watchdog.conf` | root | Watchdog config (change=180, pidfile) |
 | `/etc/default/watchdog` | root | run_watchdog=1 (required for daemon start) |
 | `/etc/systemd/system.conf.d/` | root | Disables systemd RuntimeWatchdog |
+| `/etc/systemd/system/icebox-logflush.service` | root | systemd unit triggering `log_flush.sh` on shutdown/reboot |
+| `/data/config/system_state.json` | ext4 | Persistent state for network watchdog retry logic |
+| `/opt/iceboxhero/network_watchdog.sh` | read-only overlay | Network stack watchdog script (Module 7) |
+| `/opt/iceboxhero/log_flush.sh` | read-only overlay | Shutdown journal flush script |
+| `/data/logs/` | ext4 | Destination for `log_flush.sh` persistent journal dumps |
 
 ---
 
@@ -116,21 +125,23 @@ Sensors are configured in `config.ini` using numbered `[sensor N]` sections:
 
 ```ini
 [sensor 1]
-id = 28-00000071c774    # DS18B20 ROM ID
-name = Big Freezer      # Display name
-warning = 10.0          # °F warning threshold
-critical = 15.0         # °F critical threshold
+id = 28-00000071c774         # DS18B20 ROM ID
+name = Big Freezer           # Display name
+warning = 10.0               # °F warning threshold
+critical = 15.0              # °F critical threshold
+alert_holdoff_minutes = 5    # Minutes sustained above threshold before alerting
 
 [sensor 2]
 id = 28-0000007005ed
 name = Small Freezer
 warning = 5.0
 critical = 10.0
+alert_holdoff_minutes = 5
 ```
 
 `config_helper.get_sensor_configs()` parses all `[sensor N]` sections and returns
-a list of dicts with id, name, warning, and critical keys. Missing warning/critical
-values fall back to the global defaults in `[sampling]`.
+a list of dicts with id, name, warning, critical, and alert_holdoff_reads keys.
+Missing values fall back to global defaults in `[sampling]` and `[alerts]`.
 
 ---
 
@@ -145,11 +156,12 @@ tmpfiles.d — creates /run/iceboxhero/ and /run/icebox_db/ with correct ownersh
  ▼
 systemd starts all icebox-*.service units (except watchdog)
  │
- ├─► sensor_service  — reads DS18B20 sensors, writes IPC file every 60s
- ├─► display_service — shows splash screen, waits for first real sensor read
- ├─► alert_service   — waits for NTP, sends SYSTEM_BOOT email, then monitors
- ├─► db_logger       — restores DB from SD backup, waits for NTP, logs telemetry
- └─► web_server      — serves Flask dashboard on port 8080
+ ├─► sensor_service    — reads DS18B20 sensors, writes IPC file every 60s
+ ├─► display_service   — shows splash screen, waits for first real sensor read
+ ├─► alert_service     — waits for NTP, sends SYSTEM_BOOT email, then monitors
+ ├─► db_logger         — restores DB from SD backup, waits for NTP, logs telemetry
+ ├─► web_server        — serves Flask dashboard on port 8080
+ └─► netwatchdog timer — schedules periodic network stack checks
  │
  ▼
 icebox-watchdog.service starts (After=icebox-sensor.service)

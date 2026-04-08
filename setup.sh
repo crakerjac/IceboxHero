@@ -283,6 +283,15 @@ for f in start_services.sh stop_services.sh update.sh; do
     fi
 done
 
+# Network watchdog and log flush run as root — need root ownership
+for f in network_watchdog.sh log_flush.sh; do
+    if [[ -f "${SCRIPT_DIR}/${f}" ]]; then
+        install -m 755 -o root -g root \
+            "${SCRIPT_DIR}/${f}" "/opt/iceboxhero/${f}"
+        success "Deployed: ${f}"
+    fi
+done
+
 # Python modules
 for f in config_helper.py sensor_service.py display_service.py \
           alert_service.py db_logger.py web_server.py mock_sensors.py display_test.py; do
@@ -332,6 +341,13 @@ install -d -m 755 -o "${REAL_USER}" -g "${REAL_USER}" \
     /data/db \
     /data/logs
 success "/data directories created"
+
+# Create system_state.json if it does not exist — used by network watchdog
+if [[ ! -f /data/config/system_state.json ]]; then
+    echo "{}" > /data/config/system_state.json
+    chown "${REAL_USER}:${REAL_USER}" /data/config/system_state.json
+    success "Created /data/config/system_state.json"
+fi
 
 # =============================================================================
 # STEP 6 — Configuration file
@@ -499,6 +515,8 @@ SERVICES=(
     icebox-db.service
     icebox-web.service
     icebox-watchdog.service
+    icebox-netwatchdog.timer
+    icebox-logflush.service
 )
 
 for svc in "${SERVICES[@]}"; do
@@ -608,7 +626,7 @@ echo  "  ✓ /data directory structure created"
 echo  "  ✓ Watchdog daemon configured (auto-armed at boot by icebox-watchdog.service)"
 echo  "  ✓ tmpfiles.d configured (/run/iceboxhero and /run/icebox_db created, pi-owned)"
 echo  "  ✓ logrotate configured"
-echo  "  ✓ Five systemd services installed and enabled"
+echo  "  ✓ Six systemd services + network watchdog timer installed and enabled"
 echo ""
 echo -e "${BOLD}${YEL}Required manual steps before the system will run:${RST}"
 echo ""

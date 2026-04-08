@@ -45,7 +45,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_FILE="/data/update_state"
-SERVICES=(icebox-sensor icebox-display icebox-alert icebox-db icebox-web icebox-watchdog)
+SERVICES=(icebox-sensor icebox-display icebox-alert icebox-db icebox-web icebox-watchdog icebox-netwatchdog icebox-logflush)
 
 # =============================================================================
 # Helpers
