@@ -75,6 +75,7 @@ SERVICES=(
     icebox-web.service
     icebox-watchdog.service
     icebox-netwatchdog.timer
+    icebox-netwatchdog.service
     icebox-logflush.service
 )
 

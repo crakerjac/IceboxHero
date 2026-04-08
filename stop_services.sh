@@ -43,6 +43,10 @@ SERVICES=(
     icebox-alert.service
     icebox-db.service
     icebox-web.service
+    icebox-logflush.service
+)
+TIMERS=(
+    icebox-netwatchdog.timer
 )
 
 echo ""
@@ -60,6 +64,15 @@ for svc in "${SERVICES[@]}"; do
         success "Stopped: ${svc}"
     else
         info "Not running: ${svc}"
+    fi
+done
+
+for tmr in "${TIMERS[@]}"; do
+    if systemctl is-active --quiet "${tmr}" 2>/dev/null; then
+        systemctl stop "${tmr}"
+        success "Stopped: ${tmr}"
+    else
+        info "Not running: ${tmr}"
     fi
 done
 

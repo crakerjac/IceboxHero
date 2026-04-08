@@ -45,7 +45,8 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_FILE="/data/update_state"
-SERVICES=(icebox-sensor icebox-display icebox-alert icebox-db icebox-web icebox-watchdog icebox-netwatchdog icebox-logflush)
+SERVICES=(icebox-sensor icebox-display icebox-alert icebox-db icebox-web icebox-watchdog icebox-logflush)
+TIMERS=(icebox-netwatchdog)
 
 # =============================================================================
 # Helpers
@@ -97,6 +98,16 @@ validate_services() {
             success "${svc}: active"
         else
             error "${svc}: ${STATUS}"
+            all_ok=false
+        fi
+    done
+
+    for tmr in "${TIMERS[@]}"; do
+        STATUS=$(systemctl is-active "${tmr}.timer" 2>/dev/null || echo "inactive")
+        if [[ "${STATUS}" == "active" ]]; then
+            success "${tmr}.timer: active"
+        else
+            error "${tmr}.timer: ${STATUS}"
             all_ok=false
         fi
     done
