@@ -244,6 +244,13 @@ phase_apply() {
     # Stop services safely
     header "Stopping Services"
     systemctl stop watchdog 2>/dev/null || true
+
+    # Add this loop to stop timers so they don't fire during the update
+    for tmr in "${TIMERS[@]}"; do
+        systemctl stop "${tmr}.timer" 2>/dev/null || true
+        info "Stopped: ${tmr}.timer"
+    done
+
     for svc in "${SERVICES[@]}"; do
         systemctl stop "${svc}.service" 2>/dev/null || true
         info "Stopped: ${svc}"
@@ -277,6 +284,11 @@ phase_apply() {
     # Start services to validate
     for svc in "${SERVICES[@]}"; do
         systemctl start "${svc}.service" 2>/dev/null || true
+    done
+
+    # Add this loop for timers
+    for tmr in "${TIMERS[@]}"; do
+        systemctl start "${tmr}.timer" 2>/dev/null || true
     done
     sleep 5  # Give services a moment to initialize
 

@@ -44,6 +44,7 @@ SERVICES=(
     icebox-db.service
     icebox-web.service
     icebox-logflush.service
+    icebox-netwatchdog.service
 )
 TIMERS=(
     icebox-netwatchdog.timer
@@ -91,6 +92,15 @@ for svc in "${SERVICES[@]}"; do
         echo -e "  ${GRN}●${RST} ${svc} (stopped)"
     else
         echo -e "  ${YEL}●${RST} ${svc} (${STATUS})"
+    fi
+done
+
+for tmr in "${TIMERS[@]}"; do
+    STATUS=$(systemctl is-active "${tmr}" 2>/dev/null || echo "inactive")
+    if [[ "${STATUS}" == "inactive" || "${STATUS}" == "dead" || "${STATUS}" == "unknown" ]]; then
+        echo -e "  ${GRN}●${RST} ${tmr} (stopped)"
+    else
+        echo -e "  ${YEL}●${RST} ${tmr} (${STATUS})"
     fi
 done
 
