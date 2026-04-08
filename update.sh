@@ -45,7 +45,8 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_FILE="/data/update_state"
-SERVICES=(icebox-sensor icebox-display icebox-alert icebox-db icebox-web icebox-watchdog icebox-netwatchdog icebox-logflush)
+SERVICES=(icebox-sensor icebox-display icebox-alert icebox-db icebox-web icebox-watchdog icebox-logflush)
+TIMERS=(icebox-netwatchdog)
 
 # =============================================================================
 # Helpers
@@ -97,6 +98,16 @@ validate_services() {
             success "${svc}: active"
         else
             error "${svc}: ${STATUS}"
+            all_ok=false
+        fi
+    done
+
+    for tmr in "${TIMERS[@]}"; do
+        STATUS=$(systemctl is-active "${tmr}.timer" 2>/dev/null || echo "inactive")
+        if [[ "${STATUS}" == "active" ]]; then
+            success "${tmr}.timer: active"
+        else
+            error "${tmr}.timer: ${STATUS}"
             all_ok=false
         fi
     done
@@ -233,6 +244,13 @@ phase_apply() {
     # Stop services safely
     header "Stopping Services"
     systemctl stop watchdog 2>/dev/null || true
+
+    # Add this loop to stop timers so they don't fire during the update
+    for tmr in "${TIMERS[@]}"; do
+        systemctl stop "${tmr}.timer" 2>/dev/null || true
+        info "Stopped: ${tmr}.timer"
+    done
+
     for svc in "${SERVICES[@]}"; do
         systemctl stop "${svc}.service" 2>/dev/null || true
         info "Stopped: ${svc}"
@@ -266,6 +284,11 @@ phase_apply() {
     # Start services to validate
     for svc in "${SERVICES[@]}"; do
         systemctl start "${svc}.service" 2>/dev/null || true
+    done
+
+    # Add this loop for timers
+    for tmr in "${TIMERS[@]}"; do
+        systemctl start "${tmr}.timer" 2>/dev/null || true
     done
     sleep 5  # Give services a moment to initialize
 

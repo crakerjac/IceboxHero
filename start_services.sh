@@ -39,6 +39,10 @@ SERVICES=(
     icebox-db.service
     icebox-web.service
     icebox-watchdog.service
+    icebox-logflush.service
+)
+TIMERS=(
+    icebox-netwatchdog.timer
 )
 
 echo ""
@@ -105,6 +109,15 @@ for svc in "${SERVICES[@]}"; do
     fi
 done
 
+for tmr in "${TIMERS[@]}"; do
+    if systemctl is-active --quiet "${tmr}" 2>/dev/null; then
+        info "Already running: ${tmr}"
+    else
+        systemctl start "${tmr}"
+        success "Started: ${tmr}"
+    fi
+done
+
 # =============================================================================
 # Status summary
 # =============================================================================
@@ -121,6 +134,15 @@ for svc in "${SERVICES[@]}"; do
         echo -e "  ${GRN}●${RST} ${svc}"
     else
         echo -e "  ${RED}●${RST} ${svc} (${STATUS})"
+    fi
+done
+for tmr in "${TIMERS[@]}"; do
+    STATUS=$(systemctl is-active "${tmr}" 2>/dev/null || true)
+    [[ "${STATUS}" == "unknown" || -z "${STATUS}" ]] && STATUS="inactive"
+    if [[ "${STATUS}" == "active" ]]; then
+        echo -e "  ${GRN}●${RST} ${tmr}"
+    else
+        echo -e "  ${RED}●${RST} ${tmr} (${STATUS})"
     fi
 done
 
