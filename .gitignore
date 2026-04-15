@@ -1,6 +1,7 @@
 # --- Credentials & live configuration ---
 # The live config.ini contains SMTP credentials and healthchecks.io UUIDs.
 # It must NEVER be committed. Use config.ini.example as the repo template.
+/housing/*
 config.ini
 *.bak
 
