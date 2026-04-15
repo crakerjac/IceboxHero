@@ -52,6 +52,14 @@ A self-contained, fault-tolerant freezer temperature monitoring system built on 
 
 All pins are configurable in `config.ini`.
 
+## 3D Printed Enclosure
+
+To keep this repository lightweight, the physical housing files are hosted externally. The custom enclosure is designed to mount the Raspberry Pi Zero 2 W, the ST7735S display, the buzzer, and the silence button.
+
+* [**Download the IceboxHero Enclosure on Printables**](https://www.printables.com/model/1690434-iceboxhero-enclosure-raspberry-pi-zero-2-w-freezer)
+
+The Printables page includes both the ready-to-slice `.stl` file and the parametric OpenSCAD (`.scad`) source file, allowing you to adjust the housing dimensions to fit your specific display module or hardware variations.
+
 ---
 
 ## System Architecture
