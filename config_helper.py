@@ -54,6 +54,66 @@ def safe_read_json(path, retries=3):
     return None
 
 
+def derive_sensor_state(name, temp_f, warning_thresh, critical_thresh, holdoff, tracking):
+    """Computes one sensor's debounced state.
+
+    This is the single source of truth for the WARNING/CRITICAL/NORMAL
+    threshold+holdoff logic. Previously this was implemented separately
+    (and independently) in both display_service.py and alert_service.py,
+    with no guarantee they'd never drift apart. Now it runs once, at the
+    point a reading is taken (sensor_service.py, mock_sensors.py), and
+    every consumer just reads the resulting `state` off the IPC payload.
+
+    `tracking[name]` is a mutable dict that must persist across calls for
+    the same sensor (i.e. created once by the caller before the polling
+    loop starts, not recreated each call). It holds:
+        last_zone — last real (non-None) instantaneous zone
+        streak    — consecutive reads in last_zone (real readings only —
+                     frozen, not reset, while temp_f is None; see below)
+
+    Behavior preserved exactly from the pre-refactor implementation:
+      - A None reading forces state to CRITICAL immediately, on every
+        single occurrence — no holdoff. It does NOT touch last_zone/streak,
+        so a sensor recovering from a brief None blip resumes at whatever
+        confirmed severity it already held, rather than needing to
+        re-accumulate holdoff reads from scratch.
+      - Escalation (NORMAL -> WARNING/CRITICAL) requires `holdoff`
+        consecutive real readings in the new zone before it's confirmed.
+      - Recovery is immediate — the moment a real reading falls back into
+        a lower zone, state reflects that on the very next read, no delay.
+
+    Note: this does NOT track "did state just change" — that's deliberately
+    left out. alert_service.py needs its own local one-shot flags regardless
+    (to interact correctly with its independent FAILURE/RECOVERED tracking),
+    so a wire-level "changed" signal would be redundant duplicate state, not
+    a simplification.
+    """
+    st = tracking.setdefault(name, {'last_zone': None, 'streak': 0})
+
+    if temp_f is None:
+        return 'CRITICAL'
+
+    if temp_f >= critical_thresh:
+        zone = 'CRITICAL'
+    elif temp_f >= warning_thresh:
+        zone = 'WARNING'
+    else:
+        zone = 'NORMAL'
+
+    if zone == st['last_zone']:
+        st['streak'] += 1
+    else:
+        st['last_zone'] = zone
+        st['streak'] = 1
+
+    if zone == 'CRITICAL' and st['streak'] >= holdoff:
+        return 'CRITICAL'
+    elif zone == 'WARNING' and st['streak'] >= holdoff:
+        return 'WARNING'
+    else:
+        return 'NORMAL'
+
+
 CONFIG_PATH   = '/data/config/config.ini'
 TEMPLATE_PATH = '/opt/iceboxhero/config.ini.template'
 

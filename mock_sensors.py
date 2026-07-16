@@ -29,7 +29,7 @@ import json
 import time
 import math
 import argparse
-from config_helper import load_config, get_sensor_configs
+from config_helper import load_config, get_sensor_configs, derive_sensor_state
 
 IPC_FILE = "/run/iceboxhero/telemetry_state.json"
 IPC_TEMP = "/run/iceboxhero/telemetry_state.tmp"
@@ -106,6 +106,11 @@ def main():
     # Read sensor names and thresholds from config
     sensor_configs = get_sensor_configs(config)
     sensor_names   = [s['name'] for s in sensor_configs]
+    # Per-sensor threshold/holdoff lookup and debounce bookkeeping — mirrors
+    # sensor_service.py exactly, so the IPC payload this dev tool writes is
+    # indistinguishable in shape and debounce behavior from a real sensor.
+    sensor_lookup  = {s['name']: s for s in sensor_configs}
+    tracking       = {}
     poll_interval = args.interval if args.interval is not None else config.getint('sampling', 'poll_interval')
     temp_warning  = config.getfloat('sampling', 'temp_warning')
     temp_critical = config.getfloat('sampling', 'temp_critical')
@@ -172,19 +177,24 @@ def main():
                         noise = math.sin(t * 0.3) * 0.2
                         sensor_data[name] = round(base + noise, 1)
 
-            # Annotate each reading with its alert state for console clarity
-            annotations = []
+            # Run every reading through the same debounce logic sensor_service.py
+            # uses, so this dev tool exercises (and lets you visually confirm)
+            # real holdoff/hysteresis behavior — not just instant threshold color.
+            payload_sensors = {}
+            annotations     = []
             for name, temp in sensor_data.items():
-                if temp is None:
-                    annotations.append(f"{name}=MISSING")
-                elif temp >= temp_critical:
-                    annotations.append(f"{name}={temp}F [CRITICAL]")
-                elif temp >= temp_warning:
-                    annotations.append(f"{name}={temp}F [WARNING]")
-                else:
-                    annotations.append(f"{name}={temp}F [normal]")
+                cfg     = sensor_lookup.get(name, {})
+                warn    = cfg.get('warning',  temp_warning)
+                crit    = cfg.get('critical', temp_critical)
+                holdoff = cfg.get('alert_holdoff_reads', 5)
 
-            write_ipc(sensor_data)
+                state = derive_sensor_state(name, temp, warn, crit, holdoff, tracking)
+                payload_sensors[name] = {"temp_f": temp, "state": state}
+
+                temp_str = "MISSING" if temp is None else f"{temp}F"
+                annotations.append(f"{name}={temp_str} [{state}]")
+
+            write_ipc(payload_sensors)
             print(f"[{time.strftime('%H:%M:%S')}]  {'  |  '.join(annotations)}")
 
             elapsed    = time.monotonic() - loop_start

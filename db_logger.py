@@ -280,7 +280,8 @@ def log_telemetry(ntp_sync_year, heartbeat_url):
         conn = sqlite3.connect(RAM_DB_FILE, timeout=10)
         try:
             cursor = conn.cursor()
-            for sensor_name, temp_f in sensor_data.items():
+            for sensor_name, info in sensor_data.items():
+                temp_f = info.get("temp_f")
                 if temp_f is not None:
                     cursor.execute(
                         "INSERT INTO readings (sensor_name, temperature_f) VALUES (?, ?)",

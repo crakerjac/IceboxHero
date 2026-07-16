@@ -126,46 +126,6 @@ def push_to_display(image):
 
 
 # ---------------------------------------------------------------------------
-# State evaluation
-# ---------------------------------------------------------------------------
-
-def evaluate_sensor_states(sensor_data, is_stale, sensor_thresholds,
-                            critical_counts, warning_counts):
-    """Returns per-sensor state dict: {sensor_name: "NORMAL"|"WARNING"|"CRITICAL"}
-    Also returns overall worst state for stale/error handling.
-
-    Both WARNING and CRITICAL require alert_holdoff_reads consecutive reads above
-    threshold before changing state — prevents brief door-open spikes from triggering.
-    """
-    if is_stale:
-        return {name: "CRITICAL" for name in sensor_data}, "CRITICAL"
-
-    states = {}
-    worst  = "NORMAL"
-
-    for name, temp in sensor_data.items():
-        thresholds    = sensor_thresholds.get(name, {})
-        temp_warning  = thresholds.get('warning',             10.0)
-        temp_critical = thresholds.get('critical',            15.0)
-        holdoff       = thresholds.get('alert_holdoff_reads', 5)
-
-        if temp is None:
-            states[name] = "CRITICAL"
-            worst = "CRITICAL"
-        elif temp >= temp_critical and critical_counts.get(name, 0) >= holdoff:
-            states[name] = "CRITICAL"
-            worst = "CRITICAL"
-        elif temp >= temp_warning and warning_counts.get(name, 0) >= holdoff:
-            states[name] = "WARNING"
-            if worst == "NORMAL":
-                worst = "WARNING"
-        else:
-            states[name] = "NORMAL"
-
-    return states, worst
-
-
-# ---------------------------------------------------------------------------
 # Frame rendering
 # ---------------------------------------------------------------------------
 
@@ -222,7 +182,7 @@ def draw_frame(sensor_data, sensor_order, sensor_states, worst_state, is_stale, 
     # Build lines list in sensor_order
     lines = []
     for key in sensor_order:
-        temp     = sensor_data.get(key)
+        temp     = sensor_data.get(key, {}).get("temp_f")
         temp_str = "--.-F" if temp is None else f"{temp:.1f}F"
         state    = sensor_states.get(key, "NORMAL")
         lines.append((key, temp_str, state))
@@ -351,11 +311,6 @@ def main():
     init_display(config)
     sensor_configs    = get_sensor_configs(config)
     sensor_order      = [s['name'] for s in sensor_configs]
-    sensor_thresholds = {s['name']: {
-                             'warning':             s['warning'],
-                             'critical':            s['critical'],
-                             'alert_holdoff_reads': s['alert_holdoff_reads'],
-                         } for s in sensor_configs}
     refresh_rate  = config.getfloat('display', 'refresh_rate')
     stale_timeout = config.getint('alerts', 'stale_timeout')
     disp_width    = config.getint('display', 'width')
@@ -369,10 +324,6 @@ def main():
         buf_width, buf_height = disp_width, disp_height
 
     splash_duration      = config.getint('display', 'splash_duration', fallback=60)
-    temp_critical        = config.getfloat('sampling', 'temp_critical')
-    last_ipc_timestamp   = 0
-    critical_read_counts = {}
-    warning_read_counts  = {}
     parse_error_count    = 0   # Consecutive JSON parse failures before alarming
     # Grace mode: hold neutral display state until the first real sensor read
     # arrives (IPC timestamp > 0). This prevents false CRITICAL flashes between
@@ -397,7 +348,7 @@ def main():
                 if payload and isinstance(payload, dict):
                     sd = payload.get("sensors", {})
                     ts = payload.get("timestamp", 0)
-                    if ts > 0 and any(v is not None for v in sd.values()):
+                    if ts > 0 and any(v.get("temp_f") is not None for v in sd.values()):
                         first_real_read = True
                         print(f"First real sensor read detected after {elapsed:.1f}s — ending splash early.")
                         break
@@ -412,7 +363,7 @@ def main():
     while True:
         is_stale     = False
         sensor_data  = {}
-        state        = "NORMAL"
+        state        = "NORMAL"   # fallback default — only used pre-first-real-read / on parse errors
         sensor_states = {}
         if not os.path.exists(IPC_FILE):
             state = "NORMAL"   # Show empty/booting state
@@ -432,34 +383,19 @@ def main():
                             state = "CRITICAL"
                 else:
                     parse_error_count = 0
-                    sensor_data   = payload.get("sensors", {})
-                    ipc_timestamp = payload.get("timestamp", 0)
+                    sensor_data = payload.get("sensors", {})
 
-                    # Only update critical counters on a new sensor poll
-                    if ipc_timestamp != last_ipc_timestamp:
-                        last_ipc_timestamp = ipc_timestamp
-                        for name, temp in sensor_data.items():
-                            if temp is not None:
-                                t       = sensor_thresholds.get(name, {})
-                                warn    = t.get('warning',  10.0)
-                                crit    = t.get('critical', 15.0)
-                                if temp >= crit:
-                                    critical_read_counts[name] = critical_read_counts.get(name, 0) + 1
-                                    warning_read_counts[name]  = 0
-                                elif temp >= warn:
-                                    critical_read_counts[name] = 0
-                                    warning_read_counts[name]  = warning_read_counts.get(name, 0) + 1
-                                else:
-                                    critical_read_counts[name] = 0
-                                    warning_read_counts[name]  = 0
-                            # None reading: leave counters unchanged — a dead sensor
-                            # during an active critical condition should not reset the alarm
-
+                    # State arrives precomputed from sensor_service.py — no
+                    # threshold/holdoff logic runs here anymore. We just read
+                    # it straight off the payload every frame.
                     if first_real_read:
-                        sensor_states, state = evaluate_sensor_states(
-                            sensor_data, is_stale, sensor_thresholds,
-                            critical_read_counts, warning_read_counts
-                        )
+                        if is_stale:
+                            sensor_states = {name: "CRITICAL" for name in sensor_order}
+                        else:
+                            sensor_states = {
+                                name: sensor_data.get(name, {}).get("state", "NORMAL")
+                                for name in sensor_order
+                            }
 
             except (json.JSONDecodeError, KeyError):
                 if first_real_read:
