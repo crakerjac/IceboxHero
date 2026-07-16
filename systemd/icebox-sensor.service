@@ -2,6 +2,7 @@
 Description=IceboxHero — Sensor Acquisition Service
 After=network.target
 RequiresMountsFor=/data
+AssertPathIsMountPoint=/data
 
 [Service]
 Type=simple

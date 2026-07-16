@@ -1,6 +1,7 @@
 [Unit]
 Description=IceboxHero — LCD Display Service
 RequiresMountsFor=/data
+AssertPathIsMountPoint=/data
 
 [Service]
 Type=simple

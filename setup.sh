@@ -292,6 +292,18 @@ for f in network_watchdog.sh log_flush.sh; do
     fi
 done
 
+# Watchdog repair hook — invoked directly by /usr/sbin/watchdog (repair-binary)
+# moments before a hardware reset. Required: watchdog.conf below wires it in
+# unconditionally, so it must exist.
+if [[ -f "${SCRIPT_DIR}/watchdog_repair.sh" ]]; then
+    install -m 755 -o root -g root \
+        "${SCRIPT_DIR}/watchdog_repair.sh" "/opt/iceboxhero/watchdog_repair.sh"
+    success "Deployed: watchdog_repair.sh"
+else
+    error "Missing source file: watchdog_repair.sh"
+    exit 1
+fi
+
 # Python modules
 for f in config_helper.py sensor_service.py display_service.py \
           alert_service.py db_logger.py web_server.py mock_sensors.py display_test.py; do
@@ -405,6 +417,19 @@ max-load-1       = 24
 # Trigger a hardware reboot if the sensor service stops updating the IPC file
 file   = /run/iceboxhero/telemetry_state.json
 change = 180
+# Run once, moments before the hardware reset, when the file check above
+# fails. Writes a pre-reboot journal snapshot and forces an emergency
+# RAM->SD database backup. Always reports failure (exit 1) so the reboot
+# still proceeds — see watchdog_repair.sh for details.
+#
+# repair-timeout MUST stay below watchdog-timeout (15s). The daemon can't
+# pet the hardware timer while repair-binary is running synchronously —
+# if repair-binary ran longer than the hardware timeout, the hardware
+# watchdog could fire independently mid-script. Keeping a healthy margin
+# (15s hw vs 8s repair) means the daemon always regains control in time
+# to feed the hardware watchdog before it would fire on its own.
+repair-binary  = /opt/iceboxhero/watchdog_repair.sh
+repair-timeout = 8
 EOF
 
 # Do NOT enable or start the watchdog here. The watchdog monitors the IPC
@@ -624,6 +649,7 @@ echo  "  ✓ Python dependencies installed"
 echo  "  ✓ Source code deployed to /opt/iceboxhero/"
 echo  "  ✓ /data directory structure created"
 echo  "  ✓ Watchdog daemon configured (auto-armed at boot by icebox-watchdog.service)"
+echo  "  ✓ Watchdog repair hook installed (pre-reboot log snapshot + emergency DB backup)"
 echo  "  ✓ tmpfiles.d configured (/run/iceboxhero and /run/icebox_db created, pi-owned)"
 echo  "  ✓ logrotate configured"
 echo  "  ✓ Six systemd services + network watchdog timer installed and enabled"

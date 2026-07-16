@@ -274,6 +274,7 @@ def main():
     email_thread.start()
 
     DB_CORRUPT_FLAG          = "/run/iceboxhero/db_corrupted.flag"
+    DATA_MOUNT_FLAG          = "/run/iceboxhero/data_mount_lost.flag"
     last_ipc_timestamp       = 0
     checkin_interval_seconds = config.getint('alerts', 'checkin_interval_days') * 86400
     last_checkin             = time.monotonic()
@@ -304,6 +305,20 @@ def main():
                 os.remove(DB_CORRUPT_FLAG)
             except OSError:
                 pass
+
+        # --- /data mount lost — the failure mode that silently loses ALL
+        # historical DB backups for as long as it goes unnoticed (every write
+        # in backup_ram_db_to_disk() succeeds against ephemeral storage with
+        # no exception raised). db_logger.py checks this every 5 minutes and
+        # owns clearing the flag once the mount is verified healthy again —
+        # we only raise it here. queue_email's own per-event cooldown throttles
+        # repeat emails; the buzzer re-arms each loop for as long as the flag
+        # exists, same as any other unresolved CRITICAL condition.
+        if os.path.exists(DATA_MOUNT_FLAG):
+            queue_email("SYSTEM_ERROR", "DataMount",
+                        "/data is not a real mountpoint. All database backups "
+                        "are being skipped to avoid silently writing to storage "
+                        "that will vanish on reboot. Check: mount | grep /data")
 
         # --- Read IPC state ---
         if os.path.exists(IPC_FILE):

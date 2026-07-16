@@ -49,13 +49,57 @@ RAM_DB_DIR      = "/run/icebox_db"
 RAM_DB_FILE     = os.path.join(RAM_DB_DIR, "freezer_monitor.db")    # Live runtime DB
 IPC_FILE        = "/run/iceboxhero/telemetry_state.json"
 DB_CORRUPT_FLAG = "/run/iceboxhero/db_corrupted.flag"
+DATA_MOUNT_FLAG = "/run/iceboxhero/data_mount_lost.flag"
 
 # ---------------------------------------------------------------------------
 # RAM ↔ SD backup
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# /data mount verification
+# ---------------------------------------------------------------------------
+
+def check_data_mount_valid():
+    """Verifies /data is genuinely the mounted SD partition from this
+    process's point of view — not an ephemeral stand-in directory that
+    happens to live at the same path inside this service's private mount
+    namespace (ProtectSystem=strict + ReadWritePaths=... /data).
+
+    This matters because if that ever happens, every write in
+    backup_ram_db_to_disk() below — including the last_backup timestamp
+    file — succeeds without raising a single exception. Nothing looks
+    wrong for as long as the service runs. The instant the box reboots,
+    that ephemeral view is gone, and restore_db_from_backup() pulls
+    whatever was actually last written to the real SD card, which may be
+    far older than the "last_backup" timestamp ever suggested.
+
+    Writes DATA_MOUNT_FLAG the moment the check fails so alert_service can
+    raise it within minutes instead of this going unnoticed for months.
+    Clears the flag if the mount is confirmed healthy again.
+    """
+    ok = os.path.ismount('/data')
+    if not ok:
+        print("CRITICAL: /data is not a real mountpoint from this service's view. "
+              "Skipping backup to avoid silently writing to ephemeral storage.")
+        try:
+            with open(DATA_MOUNT_FLAG, 'w') as f:
+                f.write(str(time.time()))
+        except OSError as e:
+            print(f"WARNING: Could not write {DATA_MOUNT_FLAG}: {e}")
+    elif os.path.exists(DATA_MOUNT_FLAG):
+        try:
+            os.remove(DATA_MOUNT_FLAG)
+            print("/data mount verified healthy again — cleared data_mount_lost flag.")
+        except OSError:
+            pass
+    return ok
+
+
 def backup_ram_db_to_disk(retention_days):
     """Atomically copies the live RAM database to the SD card, then prunes RAM."""
+    if not check_data_mount_valid():
+        return
+
     src = None
     try:
         os.makedirs(DB_DIR, exist_ok=True)
@@ -132,10 +176,25 @@ def restore_db_from_backup():
                 pass
 
 def backup_loop(interval_seconds, retention_days):
-    """Background thread: fires backup_ram_db_to_disk() on the configured interval."""
+    """Background thread: fires backup_ram_db_to_disk() on the configured interval.
+
+    Also independently checks /data mount validity every MOUNT_CHECK_SECONDS,
+    regardless of how long backup_interval_hours is set to. This is what
+    catches a lost/phantom /data mount within minutes instead of it going
+    unnoticed for an entire multi-day (or multi-month) uptime — see
+    check_data_mount_valid() for why that failure mode is otherwise silent.
+    """
+    MOUNT_CHECK_SECONDS = 300  # 5 minutes — independent of backup_interval_hours
+    elapsed_since_backup = 0
+
     while True:
-        time.sleep(interval_seconds)
-        backup_ram_db_to_disk(retention_days)
+        time.sleep(MOUNT_CHECK_SECONDS)
+        elapsed_since_backup += MOUNT_CHECK_SECONDS
+        check_data_mount_valid()
+
+        if elapsed_since_backup >= interval_seconds:
+            backup_ram_db_to_disk(retention_days)
+            elapsed_since_backup = 0
 
 # ---------------------------------------------------------------------------
 # Boot integrity check
@@ -255,6 +314,11 @@ def main():
 
     os.makedirs(DB_DIR, exist_ok=True)
     os.makedirs(RAM_DB_DIR, exist_ok=True)
+
+    # Verify /data is a genuine mountpoint before touching it at all — catches
+    # a bad namespace/mount state immediately at boot rather than waiting for
+    # the first periodic check in backup_loop().
+    check_data_mount_valid()
 
     # Boot sequence: integrity check and restore happen before NTP gate so
     # historical data is available immediately regardless of network state.
