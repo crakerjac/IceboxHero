@@ -19,7 +19,7 @@ import os
 import time
 import json
 
-from config_helper import load_config, get_sensor_configs
+from config_helper import load_config, get_sensor_configs, derive_sensor_state
 
 IPC_TEMP_FILE = "/run/iceboxhero/telemetry_state.tmp"
 IPC_FILE      = "/run/iceboxhero/telemetry_state.json"
@@ -107,10 +107,20 @@ def main():
 
     config         = load_config()
     poll_interval  = config.getint('sampling', 'poll_interval')
-    sensor_configs = get_sensor_configs(config)  # [{id, name, warning, critical}, ...]
+    sensor_configs = get_sensor_configs(config)  # [{id, name, warning, critical, alert_holdoff_reads}, ...]
 
-    # Write an initial all-None boot state so consumers don't crash on missing file
-    boot_state = {s['name']: None for s in sensor_configs}
+    # Per-sensor debounce bookkeeping — persists across loop iterations.
+    # See derive_sensor_state() in config_helper.py: this is the single
+    # place the WARNING/CRITICAL/NORMAL threshold+holdoff logic runs.
+    # Consumers (display_service, alert_service, web_server, db_logger)
+    # only ever read the resulting `state`/`temp_f` — none of them
+    # recompute thresholds or holdoff anymore.
+    tracking = {}
+
+    # Write an initial all-None boot state so consumers don't crash on missing file.
+    # temp_f=None here is just a placeholder — no consumer acts on `state` until
+    # first_real_read fires, which requires an actual non-None temp_f somewhere.
+    boot_state = {s['name']: {"temp_f": None, "state": "NORMAL"} for s in sensor_configs}
     write_ipc_state(boot_state)
 
     while True:
@@ -124,11 +134,19 @@ def main():
             rom_id        = sensor['id']
             logical_name  = sensor['name']
             device_folder = os.path.join(BASE_DIR, rom_id)
+
             if os.path.exists(device_folder):
-                current_readings[logical_name] = process_sensor(device_folder)
+                temp_f = process_sensor(device_folder)
             else:
-                current_readings[logical_name] = None
+                temp_f = None
                 print(f"Missing device path for: {rom_id} ({logical_name})")
+
+            state = derive_sensor_state(
+                logical_name, temp_f,
+                sensor['warning'], sensor['critical'], sensor['alert_holdoff_reads'],
+                tracking,
+            )
+            current_readings[logical_name] = {"temp_f": temp_f, "state": state}
 
         write_ipc_state(current_readings)
 

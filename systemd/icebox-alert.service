@@ -2,6 +2,7 @@
 Description=IceboxHero — Hardware Alerts & Email Service
 After=network.target
 RequiresMountsFor=/data
+AssertPathIsMountPoint=/data
 
 [Service]
 Type=simple

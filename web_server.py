@@ -73,6 +73,21 @@ def get_current_state():
     return payload
 
 
+def flatten_for_dashboard(payload):
+    """Unwraps the {"temp_f":, "state":} per-sensor schema back into flat
+    {name: temp_f_or_null} for the dashboard JS (templates/index.html),
+    which does its own instantaneous (non-debounced) threshold coloring
+    directly off the raw number and was never changed as part of this
+    refactor. This is the only translation needed to keep it working."""
+    flat = dict(payload)
+    sensors = payload.get("sensors", {})
+    flat["sensors"] = {
+        name: (info.get("temp_f") if isinstance(info, dict) else info)
+        for name, info in sensors.items()
+    }
+    return flat
+
+
 def get_24h_history():
     """Queries the RAM SQLite database for the last 24 hours of readings."""
     if not os.path.exists(DB_FILE):
@@ -185,8 +200,9 @@ def index():
 
 @app.route('/api/current')
 def api_current():
-    """Returns current sensor readings from the RAM IPC file."""
-    return jsonify(get_current_state())
+    """Returns current sensor readings from the RAM IPC file, flattened to
+    the flat {name: temp_f} shape templates/index.html expects."""
+    return jsonify(flatten_for_dashboard(get_current_state()))
 
 
 @app.route('/api/history')

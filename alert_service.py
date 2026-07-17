@@ -26,7 +26,7 @@ import urllib.request
 from email.message import EmailMessage
 from gpiozero import Buzzer
 import RPi.GPIO as _RPIGPIO
-from config_helper import load_config, safe_read_json, wait_for_ntp_sync, get_sensor_configs
+from config_helper import load_config, safe_read_json, wait_for_ntp_sync
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -99,11 +99,10 @@ silence_lock            = threading.Lock()   # Protects silence_until_timestamp
 email_queue             = []
 queue_lock              = threading.Lock()
 last_email_sent_times   = {}  # {"sensor_ALERTTYPE": monotonic_timestamp}
-critical_read_counts    = {}  # {"sensor_name": consecutive_critical_count}
 sensor_failed_state     = {}  # {"sensor_name": bool} — True while sensor is reporting None
-sensor_warning_state    = {}  # {"sensor_name": bool} — True while sensor is in warning zone
-sensor_none_counts      = {}  # {"sensor_name": int} — consecutive None read count
-sensor_warning_counts   = {}  # {"sensor_name": int} — consecutive warning read count
+sensor_warning_state    = {}  # {"sensor_name": bool} — True while a WARNING email has fired this episode
+sensor_critical_state   = {}  # {"sensor_name": bool} — True while a CRITICAL email has fired this episode
+sensor_none_counts      = {}  # {"sensor_name": int} — consecutive None read count (own rule, independent of `state`)
 
 
 # ---------------------------------------------------------------------------
@@ -262,18 +261,11 @@ def process_email_queue():
 def main():
     print("Starting Hardware Alert & Email Service...")
 
-    # Build per-sensor threshold lookup: {name: {warning, critical}}
-    sensor_configs   = get_sensor_configs(config)
-    sensor_thresholds = {s['name']: {
-                             'warning':             s['warning'],
-                             'critical':            s['critical'],
-                             'alert_holdoff_reads': s['alert_holdoff_reads'],
-                         } for s in sensor_configs}
-
     email_thread = threading.Thread(target=process_email_queue, daemon=True)
     email_thread.start()
 
     DB_CORRUPT_FLAG          = "/run/iceboxhero/db_corrupted.flag"
+    DATA_MOUNT_FLAG          = "/run/iceboxhero/data_mount_lost.flag"
     last_ipc_timestamp       = 0
     checkin_interval_seconds = config.getint('alerts', 'checkin_interval_days') * 86400
     last_checkin             = time.monotonic()
@@ -305,6 +297,20 @@ def main():
             except OSError:
                 pass
 
+        # --- /data mount lost — the failure mode that silently loses ALL
+        # historical DB backups for as long as it goes unnoticed (every write
+        # in backup_ram_db_to_disk() succeeds against ephemeral storage with
+        # no exception raised). db_logger.py checks this every 5 minutes and
+        # owns clearing the flag once the mount is verified healthy again —
+        # we only raise it here. queue_email's own per-event cooldown throttles
+        # repeat emails; the buzzer re-arms each loop for as long as the flag
+        # exists, same as any other unresolved CRITICAL condition.
+        if os.path.exists(DATA_MOUNT_FLAG):
+            queue_email("SYSTEM_ERROR", "DataMount",
+                        "/data is not a real mountpoint. All database backups "
+                        "are being skipped to avoid silently writing to storage "
+                        "that will vanish on reboot. Check: mount | grep /data")
+
         # --- Read IPC state ---
         if os.path.exists(IPC_FILE):
             mtime = os.path.getmtime(IPC_FILE)
@@ -329,23 +335,30 @@ def main():
                     # Activate on valid sensor data OR once warmup period expires —
                     # sensors may never produce data (disconnected) but we still
                     # need to enter normal operation after the grace window.
+                    # NOTE: sensor values are now nested objects ({"temp_f":...,
+                    # "state":...}), never None themselves — must check temp_f
+                    # inside, or this fires immediately on the all-placeholder
+                    # boot state regardless of whether a real reading has landed.
                     if not first_real_read:
                         if (ipc_timestamp > 0 and
-                                any(v is not None for v in sensor_data.values())):
+                                any(v.get("temp_f") is not None for v in sensor_data.values())):
                             first_real_read = True
                             print("First real sensor read confirmed — alerts active.")
                         elif time.monotonic() >= warmup_until:
                             first_real_read = True
                             print("Warmup period expired — alerts active.")
 
-                    # --- Evaluate temperature alerts ---
-                    for name, temp in sensor_data.items():
-                        # Look up per-sensor thresholds, fall back to global if unknown
-                        thresholds    = sensor_thresholds.get(name, {})
-                        temp_warning  = thresholds.get('warning',
-                                            config.getfloat('sampling', 'temp_warning'))
-                        temp_critical = thresholds.get('critical',
-                                            config.getfloat('sampling', 'temp_critical'))
+                    # --- Evaluate alerts ---
+                    # Thresholds and holdoff no longer computed here — state
+                    # arrives precomputed from sensor_service.py. This loop
+                    # only reacts to `state`; the one-shot email-dedup flags
+                    # below are alert_service's own concern (interacting with
+                    # the independent FAILURE/RECOVERED lifecycle), so they
+                    # stay local rather than depending on any wire-level
+                    # "did state change" signal from the producer.
+                    for name, info in sensor_data.items():
+                        temp  = info.get("temp_f")
+                        state = info.get("state", "NORMAL")
 
                         if temp is None:
                             trigger_buzzer = True
@@ -355,9 +368,12 @@ def main():
                                    not sensor_failed_state.get(name, False):
                                     sensor_failed_state[name] = True
                                     sensor_warning_state[name] = False
+                                    sensor_critical_state[name] = False
                                     queue_email("FAILURE", name, "MISSING/READ ERROR")
-                                # Do NOT reset critical_read_counts here — a sensor dying
-                                # mid-critical should not clear an active alarm state
+                                # Do NOT touch sensor_warning_state/sensor_critical_state
+                                # further here — a sensor dying mid-critical should not
+                                # clear an active alarm state (matches sensor_service.py's
+                                # own streak-freezing behavior on None reads).
                         else:
                             # Sensor recovered — reset none count
                             if is_new_read:
@@ -365,30 +381,23 @@ def main():
                             # Sensor recovered from a previous FAILURE state
                             if is_new_read and sensor_failed_state.get(name, False):
                                 sensor_failed_state[name] = False
-                                sensor_warning_state[name] = False
                                 queue_email("RECOVERED", name, temp, status_email=True)
 
-                            holdoff   = thresholds.get('alert_holdoff_reads', 5)
-                            if temp >= temp_critical:
+                            if state == "CRITICAL":
+                                trigger_buzzer = True
+                                if is_new_read and not sensor_critical_state.get(name, False):
+                                    sensor_critical_state[name] = True
+                                    queue_email("CRITICAL", name, temp)
+                            elif state == "WARNING":
                                 if is_new_read:
-                                    critical_read_counts[name] = critical_read_counts.get(name, 0) + 1
-                                    if critical_read_counts[name] >= holdoff:
-                                        queue_email("CRITICAL", name, temp)
-                                if critical_read_counts.get(name, 0) >= holdoff:
-                                    trigger_buzzer = True
-                            else:
+                                    sensor_critical_state[name] = False  # re-arm for next escalation
+                                    if not sensor_warning_state.get(name, False):
+                                        sensor_warning_state[name] = True
+                                        queue_email("WARNING", name, temp)
+                            else:  # NORMAL
                                 if is_new_read:
-                                    critical_read_counts[name] = 0
-                                    if temp >= temp_warning:
-                                        sensor_warning_counts[name] = sensor_warning_counts.get(name, 0) + 1
-                                        # Only email on transition INTO confirmed warning state
-                                        if sensor_warning_counts[name] >= holdoff and \
-                                           not sensor_warning_state.get(name, False):
-                                            sensor_warning_state[name] = True
-                                            queue_email("WARNING", name, temp)
-                                    else:
-                                        sensor_warning_counts[name] = 0
-                                        sensor_warning_state[name] = False
+                                    sensor_warning_state[name]  = False
+                                    sensor_critical_state[name] = False
 
             except (json.JSONDecodeError, KeyError):
                 pass  # Handled gracefully on the next loop iteration
