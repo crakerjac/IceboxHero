@@ -185,15 +185,50 @@ def queue_email(alert_type, sensor_name, current_temp, ignore_cooldown=False, st
             print(f"WARNING: Email queue full ({MAX_EMAIL_QUEUE}), dropping: {subject}")
 
 
+# A dead-man ping is a one-shot request, but unlike an email it must remain
+# pending when the network is unavailable. A generation counter prevents a
+# new boot/checkin request arriving during an in-flight ping from being lost.
+_email_alive_lock = threading.Lock()
+_email_alive_requested = 0
+_email_alive_completed = 0
+
+
 def _ping_email_alive():
-    """Ping the email dead-man snitch to confirm the email pipeline is working.
-    Called once on boot and once per checkin interval — not after every send."""
+    """Schedule a dead-man ping for the background worker.
+
+    Called once on boot and once per checkin interval — not after every send.
+    The worker retries the request until it succeeds.
+    """
+    global _email_alive_requested
+
+    if config.get('network', 'email_alive_url', fallback=''):
+        with _email_alive_lock:
+            _email_alive_requested += 1
+
+
+def _process_pending_email_alive_ping():
+    """Attempt a pending dead-man ping; leave it pending if the network fails."""
+    global _email_alive_completed
+
     email_alive_url = config.get('network', 'email_alive_url', fallback='')
-    if email_alive_url:
-        try:
-            urllib.request.urlopen(email_alive_url, timeout=5)
-        except Exception:
-            pass  # Ping failure is non-fatal
+    if not email_alive_url:
+        return
+
+    with _email_alive_lock:
+        if _email_alive_completed >= _email_alive_requested:
+            return
+        request_generation = _email_alive_requested
+
+    try:
+        response = urllib.request.urlopen(email_alive_url, timeout=5)
+        response.close()
+    except Exception as e:
+        print(f"Dead-man ping failed; will retry: {e}")
+        return
+
+    with _email_alive_lock:
+        _email_alive_completed = max(_email_alive_completed, request_generation)
+    print("Dead-man ping successful.")
 
 
 def process_email_queue():
@@ -215,6 +250,10 @@ def process_email_queue():
 
     while True:
         global email_queue
+
+        # Retry independently of SMTP. A dead-man ping must not be lost just
+        # because the network was down when boot/checkin requested it.
+        _process_pending_email_alive_ping()
 
         with queue_lock:
             items_to_send = email_queue[:]
